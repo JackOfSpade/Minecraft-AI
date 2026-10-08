@@ -62,6 +62,14 @@ final class ObservedSearchHops {
     private final ExplorationMemory memory = new ExplorationMemory();
     /** Local stances whose admitted routes made no physical progress in this search episode. */
     private final Set<BlockPos> retiredObservedGoals = new HashSet<>();
+    /**
+     * Places whose surveys have already completed during this gather request. Unlike retired
+     * routes, this history survives a fresh bounded episode: retrying the same small slope after
+     * its sixteen attempts only produces the visible back-and-forth seen in play, not new terrain.
+     */
+    private final Set<Long> exploredLandingPatches = new HashSet<>();
+    /** Match ExplorationMemory's 4x4 stance granularity: a different height on the same slope is not new frontier. */
+    private static final int EXPLORED_LANDING_GRID = 4;
 
     ObservedSearchHops(int maxAttempts) {
         this.maxAttempts = Math.max(1, maxAttempts);
@@ -94,6 +102,26 @@ final class ObservedSearchHops {
     /** Package-visible for the focused exploration-progress tests. */
     boolean isRetiredObservedGoal(BlockPos goal) {
         return goal != null && retiredObservedGoals.contains(goal);
+    }
+
+    /** Records a place after its observable resource survey has completed. */
+    void rememberExploredLanding(BlockPos landing) {
+        if (landing != null) {
+            exploredLandingPatches.add(exploredLandingPatchKey(landing));
+        }
+    }
+
+    /** Number of distinct local search patches actually reached by this task. */
+    int exploredLandingCount() {
+        return exploredLandingPatches.size();
+    }
+
+    /** Package-visible regression hook for the no-backtracking policy. */
+    boolean isPreviouslyExploredArea(BlockPos goal) {
+        if (goal == null) {
+            return false;
+        }
+        return exploredLandingPatches.contains(exploredLandingPatchKey(goal));
     }
 
     /**
@@ -146,6 +174,15 @@ final class ObservedSearchHops {
             return new Attempt(Status.REFUSED, number, heading, null, guided,
                     "directional_hop_retired_observed_goal");
         }
+        if (isPreviouslyExploredArea(observedGoal)) {
+            // Reaching a nearby cell of a slope that was already surveyed cannot reveal a new
+            // resource patch. Refuse it before Baritone starts another visible return leg; the
+            // next compass heading can still seek an actually new, observed frontier.
+            bot.getActionPack().stopAll();
+            refuse(feet, direction, guided ? rememberedHint : null);
+            return new Attempt(Status.REFUSED, number, heading, null, guided,
+                    "directional_hop_revisited_observed_area");
+        }
         if (direction >= 0) {
             memory.noteHeading(direction);
         }
@@ -190,5 +227,10 @@ final class ObservedSearchHops {
         double dx = first.getX() - second.getX();
         double dz = first.getZ() - second.getZ();
         return dx * dx + dz * dz;
+    }
+
+    private static long exploredLandingPatchKey(BlockPos position) {
+        return ((long) Math.floorDiv(position.getX(), EXPLORED_LANDING_GRID) << 32)
+                ^ (Math.floorDiv(position.getZ(), EXPLORED_LANDING_GRID) & 0xFFFFFFFFL);
     }
 }

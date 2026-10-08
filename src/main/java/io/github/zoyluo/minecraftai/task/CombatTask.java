@@ -54,8 +54,6 @@ public final class CombatTask extends AbstractTask {
     private static final double CREEPER_HEAL_SAFE_DISTANCE = 8.0D;
     private static final int RETREAT_STEP_DISTANCE = 6;
     private static final int LOST_SIGHT_LIMIT = 50; // Target blocked by a wall (no line of sight) for 2.5s straight -> end combat instead of foolishly fighting until timeout
-    private static final int DEFENSIVE_MAX_VERTICAL_DROP = 2;
-    private static final double DEFENSIVE_MAX_HORIZONTAL_DISTANCE = 8.0D;
     /** A shot the line of fire forbids (a friend on it, no clear sight) holds the drawn or loaded weapon this long before falling back to melee. */
     private static final int BLOCKED_SHOT_HOLD_LIMIT = 60;
     /** After a shot stayed blocked this long, the ranged weapon stays out of the plan this many ticks. */
@@ -80,7 +78,6 @@ public final class CombatTask extends AbstractTask {
     private final int targetKills;
     private final float retreatHpThreshold;
     private final LivingEntity fixedDefensiveTarget;
-    private final BlockPos defensiveAnchor;
     private Phase phase = Phase.ACQUIRE;
     private LivingEntity target;
     private int kills;
@@ -124,28 +121,34 @@ public final class CombatTask extends AbstractTask {
     private int rangedSuppressedUntil;
 
     public CombatTask(EntityType<?> targetType, int targetKills, float retreatHpThreshold) {
-        this(targetType, targetKills, retreatHpThreshold, null, null);
+        this(targetType, targetKills, retreatHpThreshold, null);
     }
 
     private CombatTask(EntityType<?> targetType,
                        int targetKills,
                        float retreatHpThreshold,
-                       LivingEntity fixedDefensiveTarget,
-                       BlockPos defensiveAnchor) {
+                       LivingEntity fixedDefensiveTarget) {
         this.targetType = targetType;
         this.targetKills = Math.max(1, targetKills);
         this.retreatHpThreshold = retreatHpThreshold;
         this.fixedDefensiveTarget = fixedDefensiveTarget;
-        this.defensiveAnchor = defensiveAnchor == null ? null : defensiveAnchor.immutable();
     }
 
+    public static CombatTask defensive(LivingEntity threat, float retreatHpThreshold) {
+        if (threat == null) {
+            throw new IllegalArgumentException("defensive_combat_requires_target");
+        }
+        return new CombatTask(threat.getType(), 1, retreatHpThreshold, threat);
+    }
+
+    /**
+     * Kept for callers restored from older task records. The anchor is deliberately ignored:
+     * defensive combat now follows the confirmed aggressor instead of enforcing an owner radius.
+     */
     public static CombatTask defensive(LivingEntity threat,
                                        float retreatHpThreshold,
-                                       BlockPos anchor) {
-        if (threat == null || anchor == null) {
-            throw new IllegalArgumentException("defensive_combat_requires_target_and_anchor");
-        }
-        return new CombatTask(threat.getType(), 1, retreatHpThreshold, threat, anchor);
+                                       BlockPos ignoredAnchor) {
+        return defensive(threat, retreatHpThreshold);
     }
 
     @Override
@@ -764,13 +767,15 @@ public final class CombatTask extends AbstractTask {
             retreat(bot);
             return;
         }
-        if (bot.getHealth() > retreatHpThreshold + 4.0F) {
+        boolean fullHealth = bot.getHealth() >= bot.getMaxHealth();
+        boolean fullHunger = bot.getFoodData().getFoodLevel() >= 20;
+        if (fullHealth && fullHunger) {
             bot.getActionPack().stopAll();
             eating = false;
             phase = Phase.ACQUIRE;
             return;
         }
-        if (!eating && InventoryAction.hasFood(bot)) {
+        if (!eating && !fullHunger && InventoryAction.hasFood(bot)) {
             bot.getActionPack().stopAll();
             ActionResult result = EatAction.startEating(bot);
             eating = !result.isFailed();
@@ -793,44 +798,14 @@ public final class CombatTask extends AbstractTask {
     }
 
     private boolean defensiveEngagementAllowed(AIPlayerEntity bot) {
-        if (defensiveAnchor == null) {
-            return true;
-        }
-        BlockPos here = bot.blockPosition();
-        if (!isWithinDefensiveLeash(defensiveAnchor, here)) {
-            return disengageOrRetreatFromImmediatePressure(
-                    bot, "bot_left_leash", here);
-        }
-        if (target != null && target.isAlive()) {
-            BlockPos targetPos = target.blockPosition();
-            // A hostile outside the melee leash that can be shot from here is not a reason to
-            // disengage: the bow does not need the leash (it cannot reach, and does not chase).
-            if (!isWithinDefensiveLeash(defensiveAnchor, targetPos)
-                    && !canShootFromWhereItStands(bot, target)) {
-                return disengageOrRetreatFromImmediatePressure(
-                        bot, "target_left_leash", targetPos);
-            }
-        }
         int visibleHostiles = observableActiveHostiles(bot).size();
         if (visibleHostiles > MinecraftAiConfig.get().combat().maxEnemiesToFight()) {
-            return disengageOrRetreatFromImmediatePressure(
-                    bot, "enemy_limit_exceeded", here);
-        }
-        return true;
-    }
-
-    private boolean disengageOrRetreatFromImmediatePressure(AIPlayerEntity bot,
-                                                              String reason,
-                                                              BlockPos observed) {
-        LivingEntity pressure = refreshRetreatThreat(bot);
-        if (isImmediatePressure(bot, pressure)) {
             if (phase != Phase.RETREAT) {
                 beginRetreat(bot);
             }
-            return true;
+            return false;
         }
-        endDefensiveEngagement(bot, reason, observed);
-        return false;
+        return true;
     }
 
     /**
@@ -924,49 +899,13 @@ public final class CombatTask extends AbstractTask {
         return bot.distanceTo(entity) < safeDistance;
     }
 
-    /**
-     * The fight's leash, shared with DangerWatcher so the threat range and the leash agree: a spot is
-     * inside when it is within {@code DEFENSIVE_MAX_HORIZONTAL_DISTANCE} of the anchor horizontally and
-     * not more than {@code DEFENSIVE_MAX_VERTICAL_DROP} below it.
-     */
-    static boolean isWithinDefensiveLeash(BlockPos anchor, BlockPos pos) {
-        if (pos.getY() < anchor.getY() - DEFENSIVE_MAX_VERTICAL_DROP) {
-            return false;
-        }
-        double dx = pos.getX() - anchor.getX();
-        double dz = pos.getZ() - anchor.getZ();
-        return dx * dx + dz * dz
-                <= DEFENSIVE_MAX_HORIZONTAL_DISTANCE * DEFENSIVE_MAX_HORIZONTAL_DISTANCE;
-    }
-
     /** The entity a defensive fight is bound to; {@code null} for an ordinary (non-defensive) fight. */
     LivingEntity defensiveTarget() {
-        return defensiveAnchor == null ? null : fixedDefensiveTarget;
-    }
-
-    /** True when this defensive fight's bound target already stands outside its leash. */
-    boolean defensiveTargetOutsideLeash() {
-        return defensiveAnchor != null
-                && fixedDefensiveTarget != null
-                && !isWithinDefensiveLeash(defensiveAnchor, fixedDefensiveTarget.blockPosition());
+        return fixedDefensiveTarget;
     }
 
     static boolean isImmediatePressureOn(AIPlayerEntity bot, LivingEntity entity) {
         return isImmediatePressure(bot, entity);
-    }
-
-    private void endDefensiveEngagement(AIPlayerEntity bot, String reason, BlockPos observed) {
-        finishRangedLoadout(bot);
-        bot.getActionPack().stopAll();
-        BotLog.danger(bot, "defensive_combat_disengaged",
-                "reason", reason,
-                "anchor", defensiveAnchor.toShortString(),
-                "observed", observed.toShortString());
-        if ("target_left_leash".equals(reason)) {
-            // Per-target cooldown so DangerWatcher does not re-assign the same fight next scan.
-            DangerWatcher.INSTANCE.noteTargetLeftLeash(bot, fixedDefensiveTarget);
-        }
-        complete();
     }
 
     private void chooseEngagement(AIPlayerEntity bot) {

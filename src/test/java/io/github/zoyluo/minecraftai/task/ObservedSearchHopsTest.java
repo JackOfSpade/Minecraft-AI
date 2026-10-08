@@ -20,4 +20,20 @@ class ObservedSearchHopsTest {
         hops.reset();
         assertFalse(hops.isRetiredObservedGoal(goal), "a new resource-search episode may reassess the terrain");
     }
+
+    @Test
+    void completedSearchPatchesAreNotReusedByLaterEpisodes() {
+        ObservedSearchHops hops = new ObservedSearchHops(4);
+        BlockPos landing = new BlockPos(-72, 108, -85);
+
+        hops.rememberExploredLanding(landing);
+        assertTrue(hops.isPreviouslyExploredArea(new BlockPos(-72, 105, -88)),
+                "a different-height cell in the same slope patch is not a new frontier");
+        assertFalse(hops.isPreviouslyExploredArea(new BlockPos(-72, 108, -94)),
+                "a genuinely farther observed corridor remains eligible");
+
+        hops.reset();
+        assertTrue(hops.isPreviouslyExploredArea(landing),
+                "fresh attempt budgets must not erase completed search-patch history");
+    }
 }

@@ -1,7 +1,13 @@
 package io.github.zoyluo.minecraftai.task;
 
+import io.github.zoyluo.minecraftai.action.PaceRules;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -67,5 +73,31 @@ final class EatInterruptPolicyTest {
 
         assertTrue(decision.startEating());
         assertTrue(decision.pauseActive());
+    }
+
+    @Test
+    void missingFoodWarnsWhenSprintingIsUnavailable() {
+        assertEquals(DangerWatcher.HungerWarning.NO_SPRINT,
+                DangerWatcher.hungerWarningFor(false, PaceRules.SPRINT_FOOD_FLOOR, 4));
+        assertEquals(DangerWatcher.HungerWarning.NONE,
+                DangerWatcher.hungerWarningFor(false, PaceRules.SPRINT_FOOD_FLOOR + 1, 4));
+    }
+
+    @Test
+    void missingFoodEscalatesToCriticalAndResetsOnceFoodIsAvailable() {
+        assertEquals(DangerWatcher.HungerWarning.CRITICAL,
+                DangerWatcher.hungerWarningFor(false, 4, 4));
+        assertEquals(DangerWatcher.HungerWarning.NONE,
+                DangerWatcher.hungerWarningFor(true, 4, 4));
+    }
+
+    @Test
+    void missingFoodNeverStartsAutomaticFoodAcquisition() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/io/github/zoyluo/minecraftai/task/DangerWatcher.java"));
+
+        assertFalse(source.contains("new HuntTask("));
+        assertFalse(source.contains("ResupplyTask.food()"));
+        assertTrue(source.contains("hunger_food_warning"));
     }
 }

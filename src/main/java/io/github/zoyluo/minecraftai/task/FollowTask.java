@@ -57,6 +57,8 @@ public final class FollowTask extends AbstractTask {
     // only, not the offset above), so the bot still settles close to STOP_DISTANCE and never
     // closer than STOP_DISTANCE - 0 (this only ever widens the accepted far edge).
     private static final double STOP_ARRIVAL_SLACK = 0.5D;
+    /** An arrived follower does not restart a one-block route until its owner has opened this larger gap. */
+    private static final double STOP_RESUME_DISTANCE = 5.0D;
     // A failed acquisition (BoatFollowTask.FAILED, e.g. "no water shore nearby yet") must not be
     // retried every tick: BoatLaunchTask.findLaunchSite alone is an O(33^3) visibility scan, and
     // retrying it every tick while the bot has not moved an inch produces the exact same failure
@@ -116,6 +118,8 @@ public final class FollowTask extends AbstractTask {
     private final FollowProgressWindow baritoneProgress = new FollowProgressWindow();
     private int baritoneStarts;
     private int baritoneRegoals;
+    /** True after the land follower reached its standoff, retaining a small departure hysteresis. */
+    private boolean holdingStandoff;
     // ---- pace (see FollowPace) and escort (see FollowEscort)
     /** How long the recent positions of the followed player are kept for measuring its speed (game ticks). */
     private static final int SPEED_WINDOW_TICKS = 10;
@@ -237,6 +241,7 @@ public final class FollowTask extends AbstractTask {
         baritoneOwnerFollow = false;
         baritoneProgress.clear();
         baritoneRadius = (int) STOP_DISTANCE;
+        holdingStandoff = false;
         handledOutcome = bot.getActionPack().lastRouteOutcome();
         escort.reset();
         targetSamples.clear();
@@ -565,6 +570,7 @@ public final class FollowTask extends AbstractTask {
         ActionPack pack = bot.getActionPack();
         BlockPos targetPos = target.blockPosition();
         if (bot.distanceTo(target) <= STOP_DISTANCE + STOP_ARRIVAL_SLACK) {
+            holdingStandoff = true;
             pack.stopNavigation();
             waiting = true;
             noRouteAnnounced = false;
@@ -578,6 +584,15 @@ public final class FollowTask extends AbstractTask {
             repathBackoff = false;
             return true;
         }
+        if (!shouldResumeStandoffHold(holdingStandoff, bot.distanceTo(target))) {
+            // GoalNear routes near their endpoint often finish in only a few ticks.  Recreating
+            // them whenever a moving owner is 3.6-5 blocks away produces visible stop-and-go
+            // movement, even though the follower is already within normal personal space.
+            pack.stopNavigation();
+            waiting = true;
+            return true;
+        }
+        holdingStandoff = false;
         if (!pack.isPathExecutorIdle()) {
             waiting = false;
             if (baritoneProgress.stalled(elapsed, bot.distanceTo(target), bot.getX(), bot.getZ())) {
@@ -661,6 +676,7 @@ public final class FollowTask extends AbstractTask {
                     // leg, so it must keep its independent max-hop size instead of shrinking to
                     // one block.
                     baritoneRadius = Math.max(1, baritoneRadius - 1);
+                    holdingStandoff = true;
                 }
             }
         }
@@ -685,6 +701,11 @@ public final class FollowTask extends AbstractTask {
         acceptLandRoute(targetPos, started);
         waiting = false;
         return true;
+    }
+
+    /** Whether a standoff hold should release and start another land-follow route. */
+    static boolean shouldResumeStandoffHold(boolean holdingStandoff, double distanceToTarget) {
+        return !holdingStandoff || distanceToTarget >= STOP_RESUME_DISTANCE;
     }
 
     /** A bot's own owner gets a loaded-chunk direct route; every other selected player stays inside the ordinary observation boundary. */

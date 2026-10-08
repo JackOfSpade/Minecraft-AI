@@ -67,6 +67,12 @@ final class VisibleTargetHorizonScanSourceContractTest {
                         && pursuit.contains("startVisibleLandmarkPursuitTo(")
                         && move.contains("isCurrentVisibleTargetLandmark(bot, targetSightingHint)"),
                 "generic target pursuit must re-prove current LOS before and during Baritone movement");
+        assertTrue(act.contains("seen.getY() < bot.blockPosition().getY()")
+                        && act.contains("tryDigApproach(bot, seen, \"sighted_below\")"),
+                "a local target below the bot must use the observed no-place tunnel approach, not an upward pillar");
+        assertTrue(methodBody(gather, "private boolean pillarToBlock(")
+                        .contains("block.getY() <= bot.blockPosition().getY()"),
+                "pillar recovery must reject targets at or below the bot before enumerating possible pillar floors");
     }
 
     @Test

@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.UUID;
 
 /** Pure LIFO model used by TaskManager for nested safety preemption. */
@@ -44,6 +45,14 @@ public final class ExecutionStack<T> {
 
     public boolean isEmpty() {
         return frames.isEmpty();
+    }
+
+    /** Read-only membership check for policies that must survive nested safety preemption. */
+    public boolean anyMatch(Predicate<? super T> predicate) {
+        if (predicate == null) {
+            return false;
+        }
+        return frames.stream().anyMatch(frame -> predicate.test(frame.work()));
     }
 
     public record Frame<T>(UUID frameId, T work, TaskOrigin origin) {

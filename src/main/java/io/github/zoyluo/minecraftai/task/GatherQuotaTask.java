@@ -251,6 +251,8 @@ public final class GatherQuotaTask extends AbstractTask {
     // as travel.  The current target is always the observation-fence's resolved local goal, never
     // the remote compass/memory coordinate.
     private final ObservedSearchHops observedSearchHops = new ObservedSearchHops(EXPLORE_MAX_HOPS);
+    /** Frontier count at the start of the current bounded observed-search episode. */
+    private int observedSearchEpisodeStartLandings;
     // Keeps one physical-progress budget across the small observed legs of one exploration
     // episode. A Baritone route can remain non-idle while replanning in place, so idle alone is
     // not a sufficient completion signal.
@@ -571,6 +573,8 @@ public final class GatherQuotaTask extends AbstractTask {
         exploreScan = null;
         surveyScan = null;
         observedSearchHops.reset();
+        observedSearchHops.rememberExploredLanding(bot.blockPosition());
+        observedSearchEpisodeStartLandings = observedSearchHops.exploredLandingCount();
         explorationProgress.reset();
         exploreHops = 0;
         exploreTarget = null;
@@ -1265,6 +1269,7 @@ public final class GatherQuotaTask extends AbstractTask {
                     && !bot.blockPosition().equals(exploreStart);
             if (physicallyMoved) {
                 exploreHops++;
+                observedSearchHops.rememberExploredLanding(bot.blockPosition());
                 BotLog.action(bot, "gather_explore_arrived",
                         "hop", exploreHops,
                         "at", bot.blockPosition().toShortString(),
@@ -1767,7 +1772,13 @@ public final class GatherQuotaTask extends AbstractTask {
         if (horizontalDistanceSquared(bot.blockPosition(), seen) <= SEARCH_RADIUS * SEARCH_RADIUS) {
             // Inside the local survey envelope there is no direction left to pursue. A target an
             // observed pillar reaches (above the bot, in its own column or beside it) is climbed to
-            // now; one that is out of reach below simply has no use for this look-around.
+            // now. A target below the bot cannot be reached by building upward: take the existing
+            // no-place tunnel path toward the block the bot can currently see. This is especially
+            // important for cobblestone at the foot of a visible slope; otherwise every possible
+            // pillar floor is synchronously path-planned even though none can lower the bot.
+            if (seen.getY() < bot.blockPosition().getY()) {
+                return tryDigApproach(bot, seen, "sighted_below");
+            }
             return pillarToBlock(bot, seen, true);
         }
         // A target that is visible but has no currently local mining stance is still a factual
@@ -1955,6 +1966,13 @@ public final class GatherQuotaTask extends AbstractTask {
      */
     private boolean pillarToBlock(AIPlayerEntity bot, BlockPos block, boolean mayStepOntoFloor) {
         if (isLocalScaffoldSupply() || !mayUsePillarRecovery()) {
+            return false;
+        }
+        // Pillars add elevation only.  In particular, do not enumerate alternate floors for a
+        // visible target below the bot: each floor starts a synchronous Baritone admission and
+        // cannot possibly make a lower block reachable.  The caller either takes the safe
+        // no-place tunnel route or continues its observed search instead.
+        if (block.getY() <= bot.blockPosition().getY()) {
             return false;
         }
         // The ring search casts rays for up to 28 columns (and the floor search for every level a walk could
@@ -2357,12 +2375,20 @@ public final class GatherQuotaTask extends AbstractTask {
         if (countBrokenBlocks) {
             return false;
         }
+        if (observedSearchHops.exploredLandingCount() <= observedSearchEpisodeStartLandings) {
+            BotLog.action(bot, "gather_observed_search_no_new_frontier",
+                    "item", BuiltInRegistries.ITEM.getKey(targetItem).toString(),
+                    "landings", observedSearchHops.exploredLandingCount(),
+                    "episode_start_landings", observedSearchEpisodeStartLandings);
+            return false;
+        }
         BotLog.action(bot, "gather_observed_search_restart",
                 "item", BuiltInRegistries.ITEM.getKey(targetItem).toString(),
                 "elapsed_ticks", elapsed,
                 "collected", countSoFar,
                 "previous_hops", exploreHops);
         observedSearchHops.reset();
+        observedSearchEpisodeStartLandings = observedSearchHops.exploredLandingCount();
         explorationProgress.reset();
         nextExploreAdmissionTick = -1;
         searchRadius = SEARCH_RADIUS;
@@ -2474,6 +2500,8 @@ public final class GatherQuotaTask extends AbstractTask {
             surveyScan = null;
             exploreScan = null;
             observedSearchHops.reset();
+            observedSearchHops.rememberExploredLanding(bot.blockPosition());
+            observedSearchEpisodeStartLandings = observedSearchHops.exploredLandingCount();
             explorationProgress.reset();
             exploreHops = 0;
             exploreTarget = null;
@@ -2537,24 +2565,24 @@ public final class GatherQuotaTask extends AbstractTask {
         return exploreScan != null;
     }
 
-    // Dig-approach: when a cliff-face/elevation-difference tree is GOAL_UNREACHABLE by plain
+    // Dig-approach: when a cliff-face/elevation-difference target is GOAL_UNREACHABLE by plain
     // walking, switch to startTunnelPathTo to tunnel down/through (a dig route that never places:
     // a stair or tower it built would be nobody's to take down, and the bot would stay up on it;
-    // climbing is the pillar approach's). On successful start → set targetPos=the tree and switch to GOTO,
+    // climbing is the pillar approach's). On successful start → set targetPos=the target and switch to GOTO,
     // letting goToTarget uniformly drive "arrive → harvest"; treeDigTried=true prevents
     // goToTarget from re-issuing it immediately. If digging also fails (rare: sealed off by
-    // bedrock / out of bounds) → return false, and the caller blacklists it and switches trees.
-    private boolean tryDigApproach(AIPlayerEntity bot, BlockPos tree, String why) {
+    // bedrock / out of bounds) → return false, and the caller blacklists it and selects another target.
+    private boolean tryDigApproach(AIPlayerEntity bot, BlockPos target, String why) {
         if (countBrokenBlocks || protectsPlaceableSupport) {
             return false;
         }
-        ActionResult dig = bot.getActionPack().startTunnelPathTo(tree);
+        ActionResult dig = bot.getActionPack().startTunnelPathTo(target);
         if (dig.isFailed()) {
             return false;
         }
         BotLog.action(bot, "gather_dig_approach",
-                "to", tree.getX() + "," + tree.getY() + "," + tree.getZ(), "why", why);
-        targetPos = tree.immutable();
+                "to", target.getX() + "," + target.getY() + "," + target.getZ(), "why", why);
+        targetPos = target.immutable();
         lastGotoTarget = targetPos;
         treeDigTried = true;
         pillarApproachActive = false;

@@ -302,7 +302,9 @@ final class LoadoutRoller {
         if (bow) {
             ranged.add(bow());
         }
-        arrows = r.count("profile.ranged.arrows", 0, 32);
+        // A short skirmish supply, not a full stack: ranged inhabitants can genuinely run dry
+        // and then use their melee fallback (or their fists when they have nothing else).
+        arrows = r.count("profile.ranged.arrows", 0, 10);
         stockArrows(arrows);
     }
 

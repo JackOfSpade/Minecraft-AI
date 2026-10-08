@@ -86,15 +86,22 @@ class FollowPaceTest {
     }
 
     @Test
-    void aSprintingPlayerIsFollowedAtASprintByFlagOrBySpeed() {
+    void aSprintingPlayerStillUsesTheCatchUpHysteresis() {
         Rig rig = new Rig().gap(5.0D);
         rig.sprinting = true;
-        assertEquals(Gait.SPRINT, rig.decide());
+        assertEquals(Gait.WALK, rig.decide(), "nearby sprinting must not cause stop-and-go catch-up");
+        assertEquals(Gait.WALK, rig.gap(9.9D).decide());
+        assertEquals(Gait.SPRINT, rig.gap(10.0D).decide());
+        rig.previous = Gait.SPRINT;
+        assertEquals(Gait.SPRINT, rig.gap(8.0D).decide(), "the sprint continues across the hysteresis band");
+        assertEquals(Gait.WALK, rig.gap(6.0D).decide());
         rig.sprinting = false;
         rig.speed = 5.0D;
-        assertEquals(Gait.SPRINT, rig.decide());
+        assertEquals(Gait.WALK, rig.gap(5.0D).decide(), "speed-based sprint detection uses the same stable band");
+        assertEquals(Gait.SPRINT, rig.gap(10.0D).decide());
         rig.speed = 4.9D;
-        assertEquals(Gait.WALK, rig.decide(), "4.9 blocks per second is a brisk walk");
+        rig.previous = Gait.WALK;
+        assertEquals(Gait.WALK, rig.gap(9.9D).decide(), "4.9 blocks per second is a brisk walk");
     }
 
     @Test

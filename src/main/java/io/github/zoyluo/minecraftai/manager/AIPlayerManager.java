@@ -25,6 +25,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
@@ -66,10 +67,18 @@ public final class AIPlayerManager {
      * SAFE-DEAD: after a bot dies (hp<=0) it sits in place indefinitely receiving evade requests
      * and never respawns on its own (a fake player has no client to send the vanilla respawn
      * packet, and the ServerPlayer isn't removed after death either). This revives it to
-     * full health and teleports it to a safe surface point, clearing any leftover death state.
+     * full health and teleports it to a safe point near its owner (or another real online player), clearing any leftover death state.
      * Returns true if it was revived.
      */
     public boolean respawnDeadBot(AIPlayerEntity bot) {
+        return respawnDeadBot(bot, respawnAnchor(bot).orElse(null));
+    }
+
+    /**
+     * Revives {@code bot} beside an online real player. A null anchor preserves the world-spawn fallback used by
+     * ownerless/offline test and recovery cases.
+     */
+    public boolean respawnDeadBot(AIPlayerEntity bot, ServerPlayer anchor) {
         ServerLevel world = bot.level();
         // Episodic memory: record the death event (using the death position = current position,
         // before teleporting to the surface). Distillation rule: two deaths in the same area -> danger zone.
@@ -77,25 +86,32 @@ public final class AIPlayerManager {
                 io.github.zoyluo.minecraftai.memory.EpisodeLog.Type.DEATH, bot.blockPosition(),
                 bot.getLastDamageSource() == null ? "unknown" : bot.getLastDamageSource().getMsgId());
         RuntimeLifecycleCoordinator.INSTANCE.onBotDeath(bot);
-        boolean enhancedRespawn = CapabilityRuntime.decide(
-                bot, PrivilegedCapability.EMERGENCY_TELEPORT, "death_surface_respawn").allowed();
         ServerLevel respawnWorld;
         Vec3 respawnPos;
         String respawnStrategy;
-        if (enhancedRespawn) {
-            BlockPos surface = world.getHeightmapPos(
-                    Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, bot.blockPosition());
-            respawnWorld = world;
-            respawnPos = Vec3.atBottomCenterOf(surface);
-            respawnStrategy = "operator_death_column_surface";
+        if (anchor != null && anchor.isAlive() && !(anchor instanceof AIPlayerEntity)) {
+            respawnWorld = anchor.level();
+            respawnPos = safeSpawnPosition(respawnWorld, anchor.position(), bot.getGameProfile().name());
+            respawnStrategy = ownerOf(bot).filter(owner -> owner.equals(anchor.getUUID())).isPresent()
+                    ? "owner_nearby" : "online_player_nearby";
         } else {
-            // Fake players cannot send the vanilla respawn packet. In strict mode this adapter uses
-            // the world's normal spawn area instead of teleporting to the death column's surface.
-            respawnWorld = bot.level().getServer().overworld();
-            respawnPos = safeSpawnPosition(
-                    respawnWorld, Vec3.atBottomCenterOf(respawnWorld.getRespawnData().pos()),
-                    bot.getGameProfile().name());
-            respawnStrategy = "strict_world_spawn";
+            boolean enhancedRespawn = CapabilityRuntime.decide(
+                    bot, PrivilegedCapability.EMERGENCY_TELEPORT, "death_surface_respawn").allowed();
+            if (enhancedRespawn) {
+                BlockPos surface = world.getHeightmapPos(
+                        Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, bot.blockPosition());
+                respawnWorld = world;
+                respawnPos = Vec3.atBottomCenterOf(surface);
+                respawnStrategy = "operator_death_column_surface";
+            } else {
+                // Fake players cannot send the vanilla respawn packet. In strict mode this adapter uses
+                // the world's normal spawn area instead of teleporting to the death column's surface.
+                respawnWorld = bot.level().getServer().overworld();
+                respawnPos = safeSpawnPosition(
+                        respawnWorld, Vec3.atBottomCenterOf(respawnWorld.getRespawnData().pos()),
+                        bot.getGameProfile().name());
+                respawnStrategy = "strict_world_spawn";
+            }
         }
         bot.setHealth(20.0F);
         bot.deathTime = 0;
@@ -353,6 +369,35 @@ public final class AIPlayerManager {
 
     public Optional<UUID> ownerOf(AIPlayerEntity bot) {
         return Optional.ofNullable(botOwners.get(bot.getUUID()));
+    }
+
+    /** The player a dead bot should return to: its live owner first, otherwise a real online player. */
+    public Optional<ServerPlayer> respawnAnchor(AIPlayerEntity bot) {
+        MinecraftServer server = bot.level().getServer();
+        if (server == null) {
+            return Optional.empty();
+        }
+        Optional<ServerPlayer> owner = ownerOf(bot)
+                .map(server.getPlayerList()::getPlayer)
+                .filter(player -> player.isAlive() && !(player instanceof AIPlayerEntity));
+        if (owner.isPresent()) {
+            return owner;
+        }
+        ServerPlayer sameLevel = null;
+        ServerPlayer first = null;
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (player instanceof AIPlayerEntity || !player.isAlive()) {
+                continue;
+            }
+            if (first == null) {
+                first = player;
+            }
+            if (player.level() == bot.level()) {
+                sameLevel = player;
+                break;
+            }
+        }
+        return Optional.ofNullable(sameLevel != null ? sameLevel : first);
     }
 
     /**

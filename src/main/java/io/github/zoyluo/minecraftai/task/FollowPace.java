@@ -15,11 +15,12 @@ import io.github.zoyluo.minecraftai.action.QuietZone;
  *   <li>Within {@value #CLOSE_GAP} blocks: SNEAK when the player has been sneaking for {@value #SNEAK_TICKS} ticks, else WALK.</li>
  *   <li>The player sneaks: SNEAK up to {@value #SNEAK_MIRROR_GAP} blocks; further out WALK, and SPRINT only from
  *       {@value #SNEAK_CATCH_UP_GAP} blocks and outside every quiet zone.</li>
- *   <li>The player sprints (synced flag, or {@value #SPRINT_SPEED} blocks per second over the last ten ticks): SPRINT.</li>
+ *   <li>The player sprints (synced flag, or {@value #SPRINT_SPEED} blocks per second over the last ten ticks): use the
+ *       configured walk/sprint gap hysteresis so a nearby follower does not repeatedly accelerate and brake.</li>
  *   <li>A SILENT quiet zone: SNEAK up to {@value #SNEAK_MIRROR_GAP} blocks, else WALK. CAUTION: SPRINT only from
  *       {@value #CAUTION_SPRINT_GAP} blocks, else WALK.</li>
- *   <li>The player walks (between {@value #WALK_SPEED} and {@value #SPRINT_SPEED} blocks per second): WALK unless the gap is at
- *       least {@code sprintGap}.</li>
+ *   <li>The player walks (between {@value #WALK_SPEED} and {@value #SPRINT_SPEED} blocks per second): use that same gap
+ *       hysteresis.</li>
  *   <li>Otherwise SPRINT from {@code sprintGap}, WALK up to {@code walkGap}, and in between the gait it already had.</li>
  * </ol>
  * An upgrade is immediate; a downgrade needs {@value #DWELL_TICKS} ticks at the current gait (the lease skips the pace policy's own
@@ -95,9 +96,12 @@ public final class FollowPace {
             }
             return Gait.WALK;
         }
-        // 4. The player sprints.
+        // 4. A moving player can cross the follower's small personal-space gap every few
+        // ticks.  Do not turn their sprint flag into an immediate sprint order at that gap:
+        // share the configured catch-up hysteresis below so the follower accelerates only once
+        // they are meaningfully behind, and keeps that pace until it has actually caught up.
         if (in.targetSprinting() || in.targetSpeedBps() >= SPRINT_SPEED) {
-            return Gait.SPRINT;
+            return catchUpGait(in);
         }
         // 5. Quiet zones.
         if (in.quiet() == QuietZone.Level.SILENT) {
@@ -108,9 +112,18 @@ public final class FollowPace {
         }
         // 6. The player walks: walk with them unless they have got well ahead.
         if (in.targetSpeedBps() > WALK_SPEED) {
-            return in.gap() >= in.sprintGap() ? Gait.SPRINT : Gait.WALK;
+            return catchUpGait(in);
         }
         // 7. The player stands (or is slow): sprint when far, walk when near, in between keep what we had.
+        return catchUpGait(in);
+    }
+
+    /**
+     * Stable catch-up gait shared by standing, walking, and sprinting owners.  Returning the
+     * prior gait inside the configured band prevents near-owner WALK/SPRINT flapping from
+     * repeatedly restarting short Baritone follow routes.
+     */
+    static Gait catchUpGait(Input in) {
         if (in.gap() >= in.sprintGap()) {
             return Gait.SPRINT;
         }

@@ -38,6 +38,13 @@ public final class ChatCaptureListener {
             if (text == null || text.isBlank()) {
                 return;
             }
+            // "retreat" is a doorway-safety control, not conversational intent. Resolve its
+            // recipient and begin the deterministic move now; do not wait on the chat router or
+            // send an AI request that could arrive after the player has already closed the door.
+            if (io.github.zoyluo.minecraftai.runtime.IntentController.isRetreatFollowPhrase(text)) {
+                routeImmediateRetreat(sender);
+                return;
+            }
 
             List<ChatRecipientRouter.Candidate> candidates = candidatesFor(sender);
             if (candidates.isEmpty()) {
@@ -53,6 +60,37 @@ public final class ChatCaptureListener {
                     decision -> applyDecision(sender, text, candidates, epoch, decision),
                     failure -> reportRoutingFailure(sender, epoch, failure));
         });
+    }
+
+    private static void routeImmediateRetreat(ServerPlayer sender) {
+        // Supersede any routing call still in flight for this player. Its completion must not
+        // replace the safety instruction that just began.
+        nextEpoch(sender.getUUID());
+        Optional<AIPlayerEntity> recipient = AIPlayerManager.INSTANCE.all().stream()
+                .filter(AIPlayerEntity::isAlive)
+                .filter(bot -> bot.level() == sender.level())
+                .filter(bot -> BotAuthorizationGate.INSTANCE.canCommand(sender, bot))
+                .sorted(Comparator
+                        .comparing((AIPlayerEntity bot) -> !AIPlayerManager.INSTANCE.ownerOf(bot)
+                                .filter(sender.getUUID()::equals).isPresent())
+                        .thenComparingDouble(bot -> bot.distanceToSqr(sender))
+                        .thenComparing(bot -> bot.getGameProfile().name(), String.CASE_INSENSITIVE_ORDER))
+                .findFirst();
+        if (recipient.isEmpty()) {
+            sender.displayClientMessage(Component.literal(
+                    "[Minecraft-AI] No authorized companion is in this dimension to retreat."), false);
+            return;
+        }
+        AIPlayerEntity bot = recipient.get();
+        if (!io.github.zoyluo.minecraftai.runtime.IntentController.INSTANCE.retreatAndFollow(
+                bot, sender,
+                io.github.zoyluo.minecraftai.runtime.IntentController.ControlOrigin.PLAYER_COMMAND)) {
+            sender.displayClientMessage(Component.literal(
+                    "[Minecraft-AI] That companion cannot retreat to you right now."), false);
+            return;
+        }
+        BrainCoordinator.INSTANCE.sendBotReply(bot, "Retreating behind you, then following.");
+        BotLog.comm(bot, "retreat_follow_command", "sender", sender.getGameProfile().name());
     }
 
     private static List<ChatRecipientRouter.Candidate> candidatesFor(ServerPlayer sender) {

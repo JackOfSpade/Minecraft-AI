@@ -6,8 +6,11 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.goal.GoalExecutor;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.task.RetreatFollowTask;
 import io.github.zoyluo.minecraftai.task.StuckWatcher;
 import io.github.zoyluo.minecraftai.task.TaskManager;
+import io.github.zoyluo.minecraftai.task.DangerWatcher;
+import net.minecraft.server.level.ServerPlayer;
 
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -18,6 +21,32 @@ public final class IntentController {
     public static final IntentController INSTANCE = new IntentController();
 
     private IntentController() {
+    }
+
+    /** Exact low-ambiguity phrases handled as an immediate, model-free tactical retreat. */
+    public static boolean isRetreatFollowPhrase(String text) {
+        String normalized = text == null ? "" : text.trim().toLowerCase(Locale.ROOT)
+                .replaceAll("[.!?]+$", "");
+        return java.util.Set.of("retreat", "retreat please", "please retreat").contains(normalized);
+    }
+
+    /**
+     * Cancels the current intent and starts the deterministic retreat-then-follow controller.
+     * This is deliberately separate from LLM tool routing: a player can use it as an immediate
+     * doorway safety command even when the model service is slow or unavailable.
+     */
+    public boolean retreatAndFollow(AIPlayerEntity bot, ServerPlayer player, ControlOrigin origin) {
+        requireServerThread(bot);
+        if (player == null || !player.isAlive() || player.level() != bot.level()) {
+            return false;
+        }
+        DangerWatcher.INSTANCE.stopPvpCombat(bot);
+        cancelAll(bot, origin, "retreat_follow");
+        TaskOrigin.Kind kind = origin == ControlOrigin.PLAYER_PANEL
+                ? TaskOrigin.Kind.PLAYER_PANEL : TaskOrigin.Kind.PLAYER_COMMAND;
+        TaskManager.INSTANCE.assign(bot, new RetreatFollowTask(player.getUUID(), player.getGameProfile().name()),
+                TaskOrigin.of(kind, "retreat_follow"));
+        return true;
     }
 
     public IntentControlTransaction.Outcome cancelCurrent(AIPlayerEntity bot,

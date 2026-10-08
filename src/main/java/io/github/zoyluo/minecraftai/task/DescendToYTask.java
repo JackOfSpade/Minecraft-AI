@@ -877,7 +877,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // skips fluids to avoid a lava/water collapse.
         BlockPos solid = TerrainProbe.firstSolid(world, ahead, ahead.above(), next);
         DetourEdge flatLandingEdge = new DetourEdge(feet, ahead);
-        if (solid != null && solid.equals(next) && isObservedDryStandable(bot, world, ahead)
+        if (!miningExplorationChild
+                && solid != null && solid.equals(next) && isObservedDryStandable(bot, world, ahead)
                 && !feet.equals(selfCarvedAheadAt)
                 && lateralDetours < MAX_LATERAL
                 && !traversedDetourEdges.contains(flatLandingEdge)
@@ -904,7 +905,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             // ahead.up(), discover its own third block still solid) would take this "shortcut" at
             // literally every level, forever trading a level of real descent for a same-height
             // sideways hop until the lateral budget ran out -- never the honest reactive detour this
-            // shortcut exists for.
+            // shortcut exists for. A mining-exploration child is intentionally different: it was
+            // created because a gather request needs material from below the visible surface, so
+            // it must open the safe stair instead of consuming its descent on a contour walk.
             // A walked step onto the flat landing: the detour edge is recorded when the landing is verified (settleStep).
             miner.cancel(bot);
             launchStep(bot, WalkedStep.begin(bot, ahead, WalkedStep.Kind.FLAT, "descend_flat_landing"),
@@ -913,7 +916,8 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         }
         BlockPos climbTarget = ahead.above();
         DetourEdge climbEdge = new DetourEdge(feet, climbTarget);
-        if (solid != null && solid.equals(ahead)
+        if (!miningExplorationChild
+                && solid != null && solid.equals(ahead)
                 && !(canObservePosition(bot, next.below()) && hasSafeSupport(world, next))
                 && !Standability.isDangerous(world.getBlockState(ahead))
                 && isObservedDryPassableColumn(bot, world, ahead.above())
@@ -935,7 +939,9 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             // same budget and no-replay bookkeeping.
             // A hop onto it (forward and jump). The detour edge and the rejection of the exact reverse stair from the new landing (so
             // a restart cannot descend back into the cell just escaped, mirroring the lateral detour's upper-retreat bookkeeping) are
-            // recorded when the landing is verified (settleStep).
+            // recorded when the landing is verified (settleStep). A mining-exploration child does
+            // not take this surface climb: its requested work is the controlled mined stair, with
+            // the normal visible fluid/cavity checks retained below.
             miner.cancel(bot);
             launchStep(bot, WalkedStep.begin(bot, climbTarget, WalkedStep.Kind.STEP_UP, "descend_climb_over"),
                     StepPurpose.LATERAL, feet, climbTarget, stairDirIndex, "descend_climb_over");
@@ -1783,8 +1789,13 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
             }
             // One walked diagonal step; the relocation is recorded (started latched, stair direction) when the landing is verified.
             miner.cancel(bot);
-            launchStep(bot, WalkedStep.begin(bot, candidate, WalkedStep.Kind.FLAT, "descend_fresh_entry_relocation"),
+            boolean launched = launchStep(bot,
+                    WalkedStep.begin(bot, candidate, WalkedStep.Kind.FLAT, "descend_fresh_entry_relocation"),
                     StepPurpose.ENTRY_RELOCATION, feet, candidate, safeDirection, "descend_fresh_entry_relocation");
+            if (launched && miningExplorationChild) {
+                BrainCoordinator.INSTANCE.sendBotReply(bot,
+                        "I found a safer nearby place to start the mine, so I'm moving there before I dig down.");
+            }
             return true;
         }
         return false;

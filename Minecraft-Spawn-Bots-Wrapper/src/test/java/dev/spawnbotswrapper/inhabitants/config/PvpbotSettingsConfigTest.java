@@ -30,7 +30,7 @@ class PvpbotSettingsConfigTest {
     @Test
     void theShippedDefaultsAreTheEngageLimitAndTheArcherRanges() {
         InhabitantsConfig.PvpbotSettings s = new InhabitantsConfig().pvpbotSettings;
-        assertEquals(64.0, s.maxTargetDistance, "PvP BOT only has to cover the 64 block engage limit");
+        assertEquals(32.0, s.maxTargetDistance, "PvP BOT only has to cover the 32 block engage limit");
         assertEquals(8.0, s.rangedMinRange);
         assertEquals(12.0, s.rangedOptimalRange);
         assertEquals(16.0, s.rangedMaxRange);
@@ -56,7 +56,7 @@ class PvpbotSettingsConfigTest {
     @Test
     void aFileWithoutTheBlockGetsTheShippedValues(@TempDir Path dir) throws IOException {
         InhabitantsConfig c = load(dir, "{ \"enabled\": true }").config();
-        assertEquals(64.0, c.pvpbotSettings.maxTargetDistance);
+        assertEquals(32.0, c.pvpbotSettings.maxTargetDistance);
         assertEquals(Boolean.FALSE, c.pvpbotSettings.autoTargetEnabled);
         assertEquals(Boolean.FALSE, c.pvpbotSettings.autoEquipWeapon);
         assertEquals(Boolean.FALSE, c.pvpbotSettings.autoTotemEnabled, "no block: the offhand rule's auto-totem switch is managed off");
@@ -103,7 +103,7 @@ class PvpbotSettingsConfigTest {
         InhabitantsConfig optOut = load(dir, "{ \"pvpbotSettings\": { \"autoTotemEnabled\": null, \"totemPriority\": null } }").config();
         assertNull(optOut.pvpbotSettings.autoTotemEnabled);
         assertNull(optOut.pvpbotSettings.totemPriority);
-        assertEquals(64.0, optOut.pvpbotSettings.maxTargetDistance, "the other absent keys still take their shipped value");
+        assertEquals(32.0, optOut.pvpbotSettings.maxTargetDistance, "the other absent keys still take their shipped value");
         // An explicit true is honoured (the admin gives the offhand back to PvP BOT).
         InhabitantsConfig back = load(dir, "{ \"pvpbotSettings\": { \"autoTotemEnabled\": true, \"totemPriority\": true } }").config();
         assertEquals(Boolean.TRUE, back.pvpbotSettings.autoTotemEnabled);
@@ -177,7 +177,7 @@ class PvpbotSettingsConfigTest {
     @Test
     void theWrittenDefaultFileContainsTheBlockWithItsKeys() {
         String json = ConfigIO.toJson(new InhabitantsConfig());
-        for (String key : List.of("\"pvpbotSettings\"", "\"maxTargetDistance\": 64.0", "\"rangedMinRange\": 8.0",
+        for (String key : List.of("\"pvpbotSettings\"", "\"maxTargetDistance\": 32.0", "\"rangedMinRange\": 8.0",
                 "\"rangedOptimalRange\": 12.0", "\"rangedMaxRange\": 16.0", "\"autoEquipWeapon\": false", "\"autoTargetEnabled\": false",
                 "\"bowMinDrawTime\": 20", "\"autoTotemEnabled\": false", "\"totemPriority\": false")) {
             assertTrue(json.contains(key), key + " missing from:\n" + json);

@@ -33,9 +33,10 @@ import java.util.function.Supplier;
  * Once per server tick, AFTER PvP BOT's own tick (the caller registers it in the late phase, see {@link LateTickPhase}),
  * for every inhabitant that PvP BOT has a live target for and that carries a bow or crossbow but has no arrow and no bolt
  * it can fire: hold the best melee weapon (moving it into the hotbar the way PvP BOT moves an axe there) and, where PvP BOT
- * stands still, walk toward the target with PvP BOT's own look and move-toward input until its melee mode is in reach.
- * Vanilla inventory and PvP BOT's own navigation calls only: no mixin, no teleport, no damage or reach change. A bot
- * with no melee weapon is left exactly as PvP BOT has it. Fail-soft: one failure switches the tick off with one warning.
+ * stands still, walk toward the target with PvP BOT's own look and move-toward input until its melee mode is in reach. A bot
+ * with only a ranged weapon instead selects an empty hand and uses vanilla's ordinary player attack in melee reach.
+ * Vanilla inventory, combat, and PvP BOT navigation calls only: no mixin, teleport, damage, or reach change. Fail-soft: one
+ * failure switches the tick off with one warning.
  */
 public final class OutOfAmmoGapCloser {
     private final Supplier<ServerSession> session;
@@ -153,8 +154,16 @@ public final class OutOfAmmoGapCloser {
         if (verdict == OutOfAmmo.Verdict.IDLE) {
             return;
         }
-        hold(bot, inv, meleeSlot);
-        if (verdict == OutOfAmmo.Verdict.SELECT_AND_CLOSE) {
+        if (verdict == OutOfAmmo.Verdict.PUNCH_AND_CLOSE) {
+            boolean bareHand = holdBareHand(bot, inv);
+            if (bareHand && canPunch(bot, target)) {
+                bot.attack(target);
+                return;
+            }
+        } else {
+            hold(bot, inv, meleeSlot);
+        }
+        if (verdict == OutOfAmmo.Verdict.SELECT_AND_CLOSE || verdict == OutOfAmmo.Verdict.PUNCH_AND_CLOSE) {
             TargetControl control = adapter.targetControl();
             if (control.steeringAvailable()) {
                 control.steer(bot, new AggroWorld.Pos(target.getX(), target.getEyeY(), target.getZ()),
@@ -207,6 +216,41 @@ public final class OutOfAmmoGapCloser {
             }
             inv.setSelectedSlot(slot);
         }
+    }
+
+    /** Selects a genuinely empty hotbar slot without deleting or overwriting a carried ranged weapon. */
+    private static boolean holdBareHand(ServerPlayer bot, Inventory inv) {
+        for (int i = 0; i < 9; i++) {
+            if (inv.getItem(i).isEmpty()) {
+                inv.setSelectedSlot(i);
+                return true;
+            }
+        }
+        int storage = -1;
+        for (int i = 9; i < 36; i++) {
+            if (inv.getItem(i).isEmpty()) {
+                storage = i;
+                break;
+            }
+        }
+        if (storage < 0) {
+            return false;
+        }
+        int hotbar = hotbarSlotFor(inv);
+        inv.setItem(storage, inv.getItem(hotbar));
+        inv.setItem(hotbar, ItemStack.EMPTY);
+        if (bot.isUsingItem()) {
+            bot.stopUsingItem();
+        }
+        inv.setSelectedSlot(hotbar);
+        return true;
+    }
+
+    /** The vanilla player attack is issued only at ordinary melee range, with a clear line and a charged attack bar. */
+    private static boolean canPunch(ServerPlayer bot, Entity target) {
+        return bot.distanceTo(target) <= 3.0D
+                && bot.hasLineOfSight(target)
+                && bot.getAttackStrengthScale(0.5F) >= 0.95F;
     }
 
     private static int hotbarSlotFor(Inventory inv) {

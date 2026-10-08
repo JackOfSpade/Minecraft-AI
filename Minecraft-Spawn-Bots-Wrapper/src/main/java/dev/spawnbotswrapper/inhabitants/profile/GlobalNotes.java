@@ -42,7 +42,7 @@ final class GlobalNotes {
             out.add("Auto-target is off (PvP BOT's own; the addon's managed setting pvpbotSettings.autoTargetEnabled): this bot "
                     + "never picks a target on sight by itself. While the addon's line-of-sight hunter is on (config aggro) it "
                     + "notices players it can see (sight has no block limit in its view cone, after a reaction time of 0.5 s up "
-                    + "close to 2 s at 64 blocks; it never engages anyone it sees beyond 64 blocks; nobody is seen from behind, "
+                    + "close to 2 s at 64 blocks; it never engages anyone it sees beyond 32 blocks; nobody is seen from behind, "
                     + "but sounds are heard as a vanilla sculk sensor or Warden hears them), and a hit starts a reaction, so the "
                     + "bot is not passive; with the hunter off it "
                     + "stays passive until it is attacked (revenge), given a "

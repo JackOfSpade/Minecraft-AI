@@ -13,11 +13,13 @@ import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.Monster;
@@ -42,18 +44,25 @@ public final class DangerWatcher {
     private final Map<UUID, Integer> nextNightAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextSurfaceSkipLogTick = new ConcurrentHashMap<>();
     private final Map<UUID, TrapRecord> trapRecords = new ConcurrentHashMap<>();
-    private final Map<UUID, Integer> nextHuntAttemptTick = new ConcurrentHashMap<>();
+    private final Map<UUID, HungerWarning> hungerWarnings = new ConcurrentHashMap<>();
     private final Map<UUID, PosRecord> darkStuckRecords = new ConcurrentHashMap<>(); // Mitigation: trapped-in-the-dark detection
     private final Map<UUID, Integer> nextEscapeHelpTick = new ConcurrentHashMap<>();  // Escape help-request throttling
     private final Map<UUID, Integer> nextShelterAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, ShelterEpisode> shelterEpisodes = new ConcurrentHashMap<>();
-    /** botId -> (target entity uuid -> server tick until which defensive combat vs that target is held off after it left the leash). */
-    private final Map<UUID, Map<UUID, Integer>> leashCooldowns = new ConcurrentHashMap<>();
     /** Counts how often a bot was judged trapped in the dark (before any surface escape is attempted); read by tests. */
     private final Map<UUID, Integer> darkTrapDetections = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextFollowKeepLogTick = new ConcurrentHashMap<>();
     /** The answer a bot was last given for the dark trap cell it stands in, so an unchanged situation is not announced again. */
     private final Map<UUID, DarkTrapAnswer> darkTrapAnswers = new ConcurrentHashMap<>();
+    /** Deaths wait out their one-minute cooldown here; entries leave only after a successful revive. */
+    private final Map<UUID, PendingRespawn> pendingRespawns = new ConcurrentHashMap<>();
+    /**
+     * An aggro target handed to PvP BOT. Keeping this reference is not a distance rule: it lasts
+     * only while the mob's own vanilla target still is this companion or its owner. It prevents a
+     * chase from being silently cut off merely because the opponent has moved outside the local
+     * sensing query while the bot is closing the gap.
+     */
+    private final Map<UUID, LivingEntity> pvpAggressors = new ConcurrentHashMap<>();
 
     // Layer 1 trapped backoff: an evasion-class task (evade/shelter) repeatedly firing on the same
     // cell without the bot escaping counts as "trapped". Back off for a while and stop dispatching,
@@ -62,7 +71,6 @@ public final class DangerWatcher {
     private static final int TRAP_REPEAT_LIMIT = 4;      // 4 repeated evasive attempts on the same cell -> judged trapped
     private static final int TRAP_BACKOFF_TICKS = 600;   // After being trapped, back off for 30s and stop dispatching threat tasks
     private static final int TRAP_HELP_INTERVAL = 1200;  // Minimum interval between help messages: 60s (prevents chat spam)
-    private static final int HUNT_FOOD_TARGET = 3;       // Layer 2 hunger chain: amount of raw meat to actively hunt for when there is no food
     private static final int DARK_STUCK_TICKS = 160;     // Mitigation: standing still in a dark underground spot for 8s is judged a "trapped in the dark" hazard; retreat to the surface
     /** Shelter is a final response, not a generic low-health/night-time behaviour. */
     private static final float LAST_RESORT_HEALTH_CAP = 10.0F;
@@ -77,16 +85,25 @@ public final class DangerWatcher {
     private static final int SURFACE_SKIP_LOG_TICKS = 600;  // at most one auto_light_skipped log per bot every 30s
     private static final double SHELTER_EPISODE_RADIUS = 4.0D;
     private static final double CLOSE_DEFENSIVE_HOSTILE_RADIUS = CombatCore.ATTACK_RANGE + 2.0D;
-    /** After a defensive fight ended because its target left the leash, hold off re-engaging that same target this long (5s). */
-    static final int TARGET_LEASH_COOLDOWN_TICKS = 100;
+    /** A loaded hostile that has selected a player can remain aggroed around a corner; this is sensing only, never a chase leash. */
+    private static final double VANILLA_AGGRO_SCAN_RADIUS = 128.0D;
+    /** One real-time minute at Minecraft's normal 20 ticks per second. */
+    static final int DEATH_RESPAWN_COOLDOWN_TICKS = 20 * 60;
 
     private DangerWatcher() {
+    }
+
+    /** Explicit player controls may immediately take back inputs from the optional PvP BOT bridge. */
+    public void stopPvpCombat(AIPlayerEntity bot) {
+        if (bot != null) {
+            PvpBotCombatBrain.INSTANCE.release(bot);
+        }
     }
 
     public void clear(AIPlayerEntity bot) {
         UUID id = bot.getUUID();
         nextThreatAttemptTick.remove(id);
-        leashCooldowns.remove(id);
+        stopPvpCombat(bot);
         darkTrapDetections.remove(id);
         nextEatAttemptTick.remove(id);
         nextFireAttemptTick.remove(id);
@@ -95,19 +112,19 @@ public final class DangerWatcher {
         nextNightAttemptTick.remove(id);
         nextSurfaceSkipLogTick.remove(id);
         trapRecords.remove(id);
-        nextHuntAttemptTick.remove(id);
+        hungerWarnings.remove(id);
         darkStuckRecords.remove(id);
         nextEscapeHelpTick.remove(id);
         darkTrapAnswers.remove(id);
         nextShelterAttemptTick.remove(id);
         shelterEpisodes.remove(id);
         nextFollowKeepLogTick.remove(id);
+        pvpAggressors.remove(id);
         AggroSense.clear(bot);
     }
 
     public void clearAll() {
         nextThreatAttemptTick.clear();
-        leashCooldowns.clear();
         darkTrapDetections.clear();
         nextEatAttemptTick.clear();
         nextFireAttemptTick.clear();
@@ -116,13 +133,16 @@ public final class DangerWatcher {
         nextNightAttemptTick.clear();
         nextSurfaceSkipLogTick.clear();
         trapRecords.clear();
-        nextHuntAttemptTick.clear();
+        hungerWarnings.clear();
         darkStuckRecords.clear();
         nextEscapeHelpTick.clear();
         darkTrapAnswers.clear();
         nextShelterAttemptTick.clear();
         shelterEpisodes.clear();
         nextFollowKeepLogTick.clear();
+        pendingRespawns.clear();
+        pvpAggressors.clear();
+        PvpBotCombatBrain.INSTANCE.clearAll();
     }
 
     private record TrapRecord(BlockPos pos, int repeatCount, int lastHelpTick) {
@@ -131,10 +151,23 @@ public final class DangerWatcher {
     private record PosRecord(BlockPos pos, int sinceTick) {
     }
 
+    enum HungerWarning {
+        NONE,
+        NO_SPRINT,
+        CRITICAL
+    }
+
     private record ShelterEpisode(BlockPos anchor,
                                   int terminalTick,
                                   TaskState outcome,
                                   String reason) {
+    }
+
+    /** Immutable death-time facts used after the cooldown, not a second observation a minute later. */
+    private record PendingRespawn(BlockPos deathPos, long deathTick, int visibleHostilesAtDeath) {
+        long dueTick() {
+            return deathTick + DEATH_RESPAWN_COOLDOWN_TICKS;
+        }
     }
 
     record DropRecoveryDecision(boolean allowed, String reason) {
@@ -163,20 +196,29 @@ public final class DangerWatcher {
     }
 
     public boolean scanBot(MinecraftServer server, AIPlayerEntity bot) {
-        // SAFE-DEAD: a dead bot no longer endlessly dispatches evade (zombie loop). Respawn at full health on the surface, clear tasks/plans, and notify in chat.
+        // A dead bot owns no safety work. It waits one minute, then revives beside its owner (or another real online player),
+        // rather than instantly reappearing at world spawn and trying to recover from there.
         // isAlive() alone is not a death signal: it also goes false when the entity is removed for
         // a non-death reason (e.g. chunk unload), same pitfall documented in HuntTask's
         // resolveUnavailableTarget. Only zero health or Minecraft's explicit KILLED reason count.
         if (bot.getHealth() <= 0.0F || bot.getRemovalReason() == Entity.RemovalReason.KILLED) {
-            BlockPos deathPos = bot.blockPosition();
-            long deathTick = server.getTickCount();
-            int visibleHostilesAtDeath = bot.level()
-                    .getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(8.0D),
-                            entity -> isActiveHostileThreat(bot, entity))
-                    .stream()
-                    .filter(entity -> ObservableWorldQuery.canNoticeCreature(bot, entity))
-                    .toList().size();
-            AIPlayerManager.INSTANCE.respawnDeadBot(bot);
+            PendingRespawn pending = pendingRespawns.computeIfAbsent(bot.getUUID(), ignored -> {
+                int visibleHostiles = bot.level()
+                        .getEntitiesOfClass(LivingEntity.class, bot.getBoundingBox().inflate(8.0D),
+                                entity -> isActiveHostileThreat(bot, entity))
+                        .stream()
+                        .filter(entity -> ObservableWorldQuery.canNoticeCreature(bot, entity))
+                        .toList().size();
+                return new PendingRespawn(bot.blockPosition().immutable(), server.getTickCount(), visibleHostiles);
+            });
+            if (server.getTickCount() < pending.dueTick()) {
+                return true;
+            }
+            Optional<net.minecraft.server.level.ServerPlayer> anchor = AIPlayerManager.INSTANCE.respawnAnchor(bot);
+            if (anchor.isEmpty() || !AIPlayerManager.INSTANCE.respawnDeadBot(bot, anchor.get())) {
+                return true;
+            }
+            pendingRespawns.remove(bot.getUUID());
             // Death-recovery reflex: dropped gear sits at the death point (despawns in 5 minutes); a
             // real player's first instinct is to run back for it ("corpse run").
             // Only a short, shallow route with an already-clear death site auto-runs the corpse.
@@ -186,26 +228,26 @@ public final class DangerWatcher {
             // entry/trail contract; for now, fail closed and immediately restart the original
             // Mission, rebuilding supplies from the surface.
             boolean dangerous = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE
-                    .isDanger(bot.getUUID(), deathPos);
+                    .isDanger(bot.getUUID(), pending.deathPos());
             DropRecoveryDecision recovery = dropRecoveryDecision(
-                    bot.blockPosition(), deathPos, visibleHostilesAtDeath, dangerous);
+                    bot.blockPosition(), pending.deathPos(), pending.visibleHostilesAtDeath(), dangerous);
             if (recovery.allowed()) {
-                TaskManager.INSTANCE.assign(bot, new RecoverDropsTask(deathPos, deathTick), TaskOrigin.safety("recover_drops"));
-                BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
-                        bot.getGameProfile().name() + " respawned and is returning to "
-                                + deathPos.toShortString() + " to recover dropped equipment.");
+                TaskManager.INSTANCE.assign(bot, new RecoverDropsTask(pending.deathPos(), pending.deathTick()), TaskOrigin.safety("recover_drops"));
             } else {
                 BotLog.danger(bot, "drop_recovery_skipped",
-                        "death", deathPos.toShortString(),
+                        "death", pending.deathPos().toShortString(),
                         "respawn", bot.blockPosition().toShortString(),
-                        "hostiles", visibleHostilesAtDeath,
+                        "hostiles", pending.visibleHostilesAtDeath(),
                         "reason", recovery.reason());
-                BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
-                        bot.getGameProfile().name() + " respawned safely at the surface. "
-                                + "(Unsafe equipment-recovery route skipped: " + recovery.reason() + ")");
             }
+            BrainCoordinator.INSTANCE.sendBotReply(bot, "I'm back, "
+                    + anchor.get().getGameProfile().name() + "! Ready to help.");
+            BotLog.lifecycle(bot, "bot_respawn_greeting",
+                    "owner", anchor.get().getGameProfile().name(),
+                    "recovery", recovery.reason());
             return true;
         }
+        pendingRespawns.remove(bot.getUUID());
         // combat-dangerwatcher-repeated-hostile-scans: observableActiveHostilePressure(bot) does an
         // entity-class world query plus a per-candidate observability/LOS raycast, and used to be
         // recomputed independently by collectTopThreat, refreshShelterEpisode (unconditionally,
@@ -219,9 +261,26 @@ public final class DangerWatcher {
         // the world/task state (lava escape, shelter/barricade assignment, creeper defense, combat
         // regroup, threat dispatch, ...) returns immediately afterward, so a later call within the
         // same scanBot invocation always sees the same world this list was computed from.
-        List<LivingEntity> hostilePressure = observableActiveHostilePressure(bot);
+        List<LivingEntity> hostilePressure = new java.util.ArrayList<>(observableActiveHostilePressure(bot));
         Optional<Threat> threat = collectTopThreat(bot, hostilePressure);
+        // A vanilla Mob target is a factual aggro signal. It is intentionally independent of
+        // line of sight and damage records: PvP BOT must take over the instant a hostile targets
+        // this companion or its owner, including around a corner.
+        Optional<LivingEntity> aggroTarget = immediateAggressor(bot)
+                .or(() -> Optional.ofNullable(pvpAggressors.get(bot.getUUID()))
+                        .filter(candidate -> isAggroTargetingBotOrOwner(bot, candidate)));
+        if (threat.isEmpty() && aggroTarget.isPresent()) {
+            LivingEntity aggressor = aggroTarget.get();
+            hostilePressure.add(aggressor);
+            threat = Optional.of(new Threat(Threat.Type.HOSTILE, Threat.Severity.MEDIUM,
+                    aggressor, aggressor.blockPosition()));
+        }
         Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
+        // A manual retreat becomes ordinary follow after reaching the player's rear block. It is
+        // an explicit tactical stance, so neither a visible hostile nor a no-LOS aggro signal may
+        // replace it with combat until that follow is cancelled. Nested emergency work does not
+        // erase this state: the task may be retained beneath the safety stack.
+        boolean retreatFollowMode = TaskManager.INSTANCE.hasActiveOrPausedTask(bot, RetreatFollowTask.class);
         refreshShelterEpisode(bot, hostilePressure);
         // Self-rescue on lava contact (highest priority, overrides threat): lava burns 4 damage per
         // tick, killing the bot within seconds. SurvivalGuard only interrupts the current job, with a
@@ -396,13 +455,14 @@ public final class DangerWatcher {
         // Checked ahead of ordinary Combat so a live fight is paused/replaced the moment the
         // threshold is crossed; CombatRegroupTask itself keeps striking anything adjacent while it
         // falls back, so this is a fighting retreat rather than a flee.
-        if (maybeRegroup(bot, active)) {
+        if (!retreatFollowMode && aggroTarget.isEmpty() && maybeRegroup(bot, active)) {
             return true;
         }
         // Combat owns ordinary close contact.  The single exception is the narrowly proven
         // two-hit lethal boundary below: it replaces melee with a retreat-first shelter rather
         // than trying to place walls under the attacking mob's feet.
-        if (active.isPresent()
+        if (!aggroTarget.isPresent()
+                && active.isPresent()
                 && active.get() instanceof CombatTask
                 && (threat.isEmpty()
                 || threat.get().type() == Threat.Type.HOSTILE
@@ -446,21 +506,55 @@ public final class DangerWatcher {
                     "threat", threat.get().type());
             return true;
         }
+        // The emergency branches above (lava/fire, creeper defense, low-health shelter and
+        // healing) retain priority. Once they have declined ownership, a current vanilla aggro
+        // target hands this exact AI player to PvP BOT's combat brain. No owner-distance leash is
+        // applied: the fallback navigation continues following the target beyond PvP BOT's normal
+        // 32-block engage horizon.
+        boolean lowHealthRecovery = bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp();
+        if (retreatFollowMode || lowHealthRecovery) {
+            PvpBotCombatBrain.INSTANCE.release(bot);
+            pvpAggressors.remove(bot.getUUID());
+        } else if (aggroTarget.filter(target -> !CombatCore.isMeleeForbiddenThreat(target)).isPresent()
+                && PvpBotCombatBrain.INSTANCE.available()) {
+            LivingEntity aggressor = aggroTarget.orElseThrow();
+            boolean wasPvpCombatActive = PvpBotCombatBrain.INSTANCE.isActive(bot);
+            if (active.isPresent()) {
+                if (active.get() instanceof CombatTask) {
+                    TaskManager.INSTANCE.abort(bot);
+                } else {
+                    TaskManager.INSTANCE.pauseFor(bot, "pvp_bot_combat");
+                }
+            }
+            if (PvpBotCombatBrain.INSTANCE.tick(server, bot, aggressor)) {
+                pvpAggressors.put(bot.getUUID(), aggressor);
+                if (!wasPvpCombatActive) {
+                    BotLog.danger(bot, "pvp_bot_combat_active",
+                            "target", aggressor.getType().toString(),
+                            "owner_target", isAggroTargetingOwner(bot, aggressor));
+                }
+                return true;
+            }
+            // The optional bridge failed after a task was preserved. Restore it now so the
+            // existing deterministic safety fallback can still make a decision this scan.
+            pvpAggressors.remove(bot.getUUID());
+            if (active.isPresent() && !(active.get() instanceof CombatTask)) {
+                TaskManager.INSTANCE.resumeFromPause(bot);
+                active = TaskManager.INSTANCE.getActive(bot);
+            }
+        } else if (PvpBotCombatBrain.INSTANCE.isActive(bot)) {
+            PvpBotCombatBrain.INSTANCE.release(bot);
+            pvpAggressors.remove(bot.getUUID());
+        }
         if (threat.isPresent()) {
             Threat top = threat.get();
             if (top.severity().ordinal() >= Threat.Severity.MEDIUM.ordinal()
                     && shouldAssignThreatTask(bot, active, top)
                     && canAssignThreatTask(server, bot, top)
-                    && !followKeepsThreat(server, bot, active, top)) {
+                    && (aggroTarget.isPresent() || !followKeepsThreat(server, bot, active, top))) {
                 Task task = decideCombatOrEvade(bot, top, canAttemptShelter(server, bot), hostilePressure);
-                // Align with the leash: a defensive fight against a target that is already outside its
-                // leash (a drowned in water 10 blocks off / below the floor) would be assigned and then
-                // immediately disengage (target_left_leash), over and over. Hold off instead.
-                boolean heldOff = task instanceof CombatTask leashed
-                        && holdOffOutOfLeashCombat(server, bot, leashed);
-                if (!heldOff) {
-                    boolean trapped = trappedBackoff(server, bot, task);
-                    if (trapped) {
+                boolean trapped = trappedBackoff(server, bot, task);
+                if (trapped) {
                         boolean criticalHostile = isHostileBacked(top)
                                 && (top.type() == Threat.Type.LOW_HP
                                 || top.severity() == Threat.Severity.HIGH);
@@ -471,27 +565,26 @@ public final class DangerWatcher {
                         // critical hostile while leaving only paused mission work. Fall through and
                         // assign the already-decided shelter/evade owner; the normal high-severity
                         // cooldown below replaces the longer diagnostic backoff.
-                    }
-                    if (active.isPresent()
-                            && shouldPauseForThreat(active.get(), top, task)
-                            && shouldPreserveActiveWork(bot)) {
-                        if (task instanceof EmergencyShelterTask) {
-                            markThreatDirectionAvoided(active.get(), bot, top);
-                        }
-                        TaskManager.INSTANCE.pauseFor(bot, "threat: " + top.type());
-                    }
-                    TaskManager.INSTANCE.assign(bot, task, TaskOrigin.safety("threat:" + top.type()));
-                    if (task instanceof EmergencyShelterTask) {
-                        noteShelterAttempt(server, bot);
-                    }
-                    nextThreatAttemptTick.put(bot.getUUID(), server.getTickCount() + threatCooldownTicks(top, task));
-                    BotLog.danger(bot, "threat_detected",
-                            "type", top.type(),
-                            "severity", top.severity(),
-                            "source", top.pos(),
-                            "decision", task.name());
-                    return true;
                 }
+                if (active.isPresent()
+                        && shouldPauseForThreat(active.get(), top, task)
+                        && shouldPreserveActiveWork(bot)) {
+                    if (task instanceof EmergencyShelterTask) {
+                        markThreatDirectionAvoided(active.get(), bot, top);
+                    }
+                    TaskManager.INSTANCE.pauseFor(bot, "threat: " + top.type());
+                }
+                TaskManager.INSTANCE.assign(bot, task, TaskOrigin.safety("threat:" + top.type()));
+                if (task instanceof EmergencyShelterTask) {
+                    noteShelterAttempt(server, bot);
+                }
+                nextThreatAttemptTick.put(bot.getUUID(), server.getTickCount() + threatCooldownTicks(top, task));
+                BotLog.danger(bot, "threat_detected",
+                        "type", top.type(),
+                        "severity", top.severity(),
+                        "source", top.pos(),
+                        "decision", task.name());
+                return true;
             }
         }
         // Mitigation hardening (life-saving fallback): trapped in a dark underground spot -> retreat to the surface, taking priority over resupply/eating.
@@ -741,18 +834,6 @@ public final class DangerWatcher {
                 && !taskDoesNotUseHeldTool) {
             Item item = mainHand.getItem();
             task = ResupplyTask.tool(item);
-        } else {
-            MinecraftAiConfig.Survival survival = MinecraftAiConfig.get().survival();
-            // When there is no food: if prey is nearby, yield to maybeEat's hunting (hunting meat in
-            // the wild is more reliable than digging through chests for wheat, see the layer-2 hunger
-            // chain); only fall back to ResupplyTask.food() (searching storage chests) when there is
-            // no prey nearby. Fixes "repeatedly resupplying for wheat and failing instead of hunting
-            // when hungry".
-            if (bot.getFoodData().getFoodLevel() <= survival.hungerEatThreshold()
-                    && !InventoryAction.hasFood(bot)
-                    && !HuntTask.hasPreyNearby(bot)) {
-                task = ResupplyTask.food();
-            }
         }
 
         if (task == null) {
@@ -797,6 +878,8 @@ public final class DangerWatcher {
         // the configured eat threshold, and does not wait for a walk to finish: a follower on a long walk would otherwise run out
         // of sprint before it ever ate. Combat/evade, a hostile in view and a protected transaction still defer it (below).
         boolean sprintLimitHunger = foodLevel <= SPRINT_LIMIT_FOOD;
+        boolean hasFood = InventoryAction.hasFood(bot);
+        updateHungerWarning(server, bot, hasFood, foodLevel, survival.hungerCriticalThreshold());
         if (foodLevel > survival.hungerEatThreshold()
                 && !sprintLimitHunger
                 && !healingEmergency
@@ -835,11 +918,10 @@ public final class DangerWatcher {
         if (now < nextEatAttemptTick.getOrDefault(bot.getUUID(), 0)) {
             return false;
         }
-        if (!InventoryAction.hasFood(bot)) {
-            // Layer 2 hunger chain: no food at all -> if huntable animals are nearby, actively hunt them for raw meat instead of just waiting to starve.
-            if (huntForFood(server, bot, active)) {
-                return true;
-            }
+        if (!hasFood) {
+            // Food acquisition is player-directed work.  The watcher tells the player when hunger
+            // removes sprinting or becomes critical, but never abandons its current task to hunt.
+            // A player can still explicitly request a HuntTask through the normal command/goal path.
             nextEatAttemptTick.put(bot.getUUID(), now + 100);
             return false;
         }
@@ -918,39 +1000,39 @@ public final class DangerWatcher {
                 || task instanceof ContainerTask;
     }
 
-    // Layer 2 hunger chain: actively hunt for food (raw meat) when there is no food. Only dispatched
-    // when not already responding to a threat (evade/combat); never dispatched when there is no prey nearby.
-    private boolean huntForFood(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
-        boolean critical = bot.getFoodData().getFoodLevel()
-                <= MinecraftAiConfig.get().survival().hungerCriticalThreshold();
-        if (TaskManager.INSTANCE.isUserPaused(bot) && !critical) {
-            return false;
+    /**
+     * Human-facing missing-food status.  The state map emits only on escalation, not every scan:
+     * first when vanilla sprinting is unavailable, then once more if hunger becomes critical.
+     */
+    private void updateHungerWarning(MinecraftServer server, AIPlayerEntity bot, boolean hasFood,
+                                     int foodLevel, int criticalThreshold) {
+        HungerWarning warning = hungerWarningFor(hasFood, foodLevel, criticalThreshold);
+        UUID botId = bot.getUUID();
+        if (warning == HungerWarning.NONE) {
+            hungerWarnings.remove(botId);
+            return;
         }
-        if (active.isPresent()) {
-            if (active.get() instanceof HuntTask) {
-                return true; // Already hunting for food, keep it
-            }
-            if (active.get() instanceof EvadeTask || active.get() instanceof CombatTask) {
-                return false; // Currently responding to a threat, don't interrupt
-            }
+        HungerWarning previous = hungerWarnings.put(botId, warning);
+        if (warning == previous) {
+            return;
         }
-        int now = server.getTickCount();
-        if (now < nextHuntAttemptTick.getOrDefault(bot.getUUID(), 0)) {
-            return false;
+        String text = warning == HungerWarning.CRITICAL
+                ? "I need food now: my hunger is critical and I cannot sprint."
+                : "I need food: I cannot sprint until I eat.";
+        server.getPlayerList().broadcastSystemMessage(
+                Component.literal("<" + bot.getGameProfile().name() + "> " + text), false);
+        BotLog.danger(bot, "hunger_food_warning", "level", foodLevel, "warning", warning);
+    }
+
+    static HungerWarning hungerWarningFor(boolean hasFood, int foodLevel, int criticalThreshold) {
+        if (hasFood) {
+            return HungerWarning.NONE;
         }
-        if (!HuntTask.hasPreyNearby(bot)) {
-            nextHuntAttemptTick.put(bot.getUUID(), now + 200); // No prey nearby, check again later
-            return false;
+        if (foodLevel <= criticalThreshold) {
+            return HungerWarning.CRITICAL;
         }
-        if (active.isPresent()) {
-            TaskManager.INSTANCE.pauseFor(bot, "hunt_for_food");
-        }
-        TaskManager.INSTANCE.assign(bot, new HuntTask(HUNT_FOOD_TARGET), critical
-                ? TaskOrigin.safety("critical_hunt_for_food")
-                : TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "hunt_for_food"));
-        nextHuntAttemptTick.put(bot.getUUID(), now + 400);
-        BotLog.danger(bot, "hunt_for_food_started", "food", bot.getFoodData().getFoodLevel());
-        return true;
+        return foodLevel <= PaceRules.SPRINT_FOOD_FLOOR
+                ? HungerWarning.NO_SPRINT : HungerWarning.NONE;
     }
 
     private Task decideCombatOrEvade(AIPlayerEntity bot,
@@ -973,13 +1055,13 @@ public final class DangerWatcher {
         // cost/benefit gate rejects low HP. Defensive Combat starts in RETREAT, counterattacks only
         // if boxed in, and owns the later safe-heal boundary.
         if (!shelterAllowed && shouldDefensivelyFightClosePressure(bot, threat, hostilePressure)) {
-            return CombatTask.defensive(threat.entity(), combat.retreatHp(), bot.blockPosition());
+            return CombatTask.defensive(threat.entity(), combat.retreatHp());
         }
         // combat stuck-trap: combat repeatedly aborted as stuck (target unreachable -- e.g. a zombie below in a mineshaft/behind a wall) -> stop standing there waiting to die, switch to fleeing.
         if (canFight(bot, threat, combat, hostilePressure) && !combatStuck(bot)) {
             // Safety combat defends the interrupted work site. It binds the observed entity and
             // cannot turn into an open-ended hunt by reacquiring another mob of the same type.
-            return CombatTask.defensive(threat.entity(), combat.retreatHp(), bot.blockPosition());
+            return CombatTask.defensive(threat.entity(), combat.retreatHp());
         }
         return new EvadeTask(threat);
     }
@@ -1533,11 +1615,71 @@ public final class DangerWatcher {
         return CombatCore.hostileTo(bot, entity);
     }
 
+    /**
+     * Finds a loaded mob whose own vanilla goal currently targets this companion or its owner.
+     * It intentionally does not consult sight, recent damage, or the old owner-radius leash.
+     */
+    private static Optional<LivingEntity> immediateAggressor(AIPlayerEntity bot) {
+        if (bot.level().getServer() == null) {
+            return Optional.empty();
+        }
+        net.minecraft.server.level.ServerPlayer owner = AIPlayerManager.INSTANCE.ownerOf(bot)
+                .map(id -> bot.level().getServer().getPlayerList().getPlayer(id))
+                .filter(candidate -> candidate.isAlive() && candidate.level() == bot.level())
+                .orElse(null);
+        List<LivingEntity> candidates = new java.util.ArrayList<>();
+        candidates.addAll(bot.level().getEntitiesOfClass(Mob.class,
+                bot.getBoundingBox().inflate(VANILLA_AGGRO_SCAN_RADIUS),
+                mob -> mob.getTarget() == bot && !CombatCore.isFriendly(bot, mob)));
+        if (owner != null) {
+            candidates.addAll(owner.level().getEntitiesOfClass(Mob.class,
+                    owner.getBoundingBox().inflate(VANILLA_AGGRO_SCAN_RADIUS),
+                    mob -> mob.getTarget() == owner && !CombatCore.isFriendly(bot, mob)));
+        }
+        final net.minecraft.server.level.ServerPlayer liveOwner = owner;
+        return candidates.stream()
+                .filter(LivingEntity::isAlive)
+                .distinct()
+                .min(Comparator.comparingDouble(entity -> {
+                    double botDistance = bot.distanceToSqr(entity);
+                    double ownerDistance = liveOwner == null ? Double.MAX_VALUE : liveOwner.distanceToSqr(entity);
+                    return Math.min(botDistance, ownerDistance);
+                }));
+    }
+
+    private static boolean isAggroTargetingOwner(AIPlayerEntity bot, LivingEntity aggressor) {
+        if (!(aggressor instanceof Mob mob) || bot.level().getServer() == null) {
+            return false;
+        }
+        return AIPlayerManager.INSTANCE.ownerOf(bot)
+                .map(id -> bot.level().getServer().getPlayerList().getPlayer(id))
+                .filter(owner -> owner != null && owner.level() == bot.level())
+                .map(owner -> mob.getTarget() == owner)
+                .orElse(false);
+    }
+
+    /** True only for the factual vanilla aggro relation, with no sight or distance clause. */
+    private static boolean isAggroTargetingBotOrOwner(AIPlayerEntity bot, LivingEntity aggressor) {
+        if (!(aggressor instanceof Mob mob)) {
+            return false;
+        }
+        if (mob.getTarget() == bot) {
+            return true;
+        }
+        return isAggroTargetingOwner(bot, aggressor);
+    }
+
     private static boolean shouldAssignThreatTask(AIPlayerEntity bot, Optional<Task> active, Threat threat) {
+        if (TaskManager.INSTANCE.hasActiveOrPausedTask(bot, RetreatFollowTask.class)) {
+            return false;
+        }
         if (active.isEmpty()) {
             return true;
         }
         Task task = active.get();
+        if (task instanceof RetreatFollowTask) {
+            return false;
+        }
         if (task instanceof EvadeTask) {
             return false;
         }
@@ -1733,60 +1875,6 @@ public final class DangerWatcher {
     private static boolean isMeleeForbiddenThreat(Threat threat) {
         return threat.entity() != null
                 && CombatCore.isMeleeForbiddenThreat(threat.entity());
-    }
-
-    /**
-     * True when defensive combat against {@code combat}'s bound target should not be assigned right
-     * now: the target is already outside the fight's leash (see
-     * {@link CombatTask#isWithinDefensiveLeash}) or a recent fight against it ended with
-     * {@code target_left_leash} (per-target cooldown), and it exerts no immediate pressure.
-     * Assigning anyway made combat start and disengage in the same breath, repeatedly (a drowned
-     * in water out of reach). Immediate pressure (ranged, or close and visible) and a bot that
-     * was just hurt keep the existing behaviour.
-     */
-    private boolean holdOffOutOfLeashCombat(MinecraftServer server, AIPlayerEntity bot, CombatTask combat) {
-        LivingEntity target = combat.defensiveTarget();
-        if (target == null || bot.hurtTime > 0) {
-            return false;
-        }
-        int now = server.getTickCount();
-        Map<UUID, Integer> cooldowns = leashCooldowns.get(bot.getUUID());
-        Integer until = cooldowns == null ? null : cooldowns.get(target.getUUID());
-        boolean cooling = until != null && now < until;
-        if (until != null && !cooling) {
-            cooldowns.remove(target.getUUID());
-        }
-        boolean outside = combat.defensiveTargetOutsideLeash();
-        if (!cooling && !outside) {
-            return false;
-        }
-        if (CombatTask.isImmediatePressureOn(bot, target)) {
-            return false;
-        }
-        if (CombatTask.canShootFromWhereItStands(bot, target)) {
-            // Outside the melee leash but inside bow range with a clear line: shoot from here
-            // instead of holding off (or assigning melee that would immediately disengage).
-            return false;
-        }
-        if (!cooling) {
-            // First sighting outside the leash: log once and start the per-target cooldown so the
-            // same target is not re-evaluated (and re-logged) on every scan.
-            leashCooldowns.computeIfAbsent(bot.getUUID(), id -> new ConcurrentHashMap<>())
-                    .put(target.getUUID(), now + TARGET_LEASH_COOLDOWN_TICKS);
-            BotLog.danger(bot, "combat_held_off", "reason", "target_outside_leash",
-                    "target", target.getType().toString(),
-                    "distance", (int) bot.distanceTo(target));
-        }
-        return true;
-    }
-
-    /** Called by defensive Combat when it ended because its target left the leash. */
-    void noteTargetLeftLeash(AIPlayerEntity bot, LivingEntity target) {
-        if (target == null || bot.level().getServer() == null) {
-            return;
-        }
-        leashCooldowns.computeIfAbsent(bot.getUUID(), id -> new ConcurrentHashMap<>())
-                .put(target.getUUID(), bot.level().getServer().getTickCount() + TARGET_LEASH_COOLDOWN_TICKS);
     }
 
     /** A completed escape is a new safety boundary; its assignment-time debounce must not linger. */

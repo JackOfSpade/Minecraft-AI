@@ -97,8 +97,10 @@ class OutOfAmmoTest {
                 "it has an arrow: PvP BOT shoots");
         assertEquals(Verdict.IDLE, OutOfAmmo.judge(new Facts(true, false, false, true, true, false, true, 0, "MELEE", 12.0, MELEE)),
                 "a loaded crossbow is fired first");
-        assertEquals(Verdict.IDLE, OutOfAmmo.judge(new Facts(true, false, false, true, true, false, false, -1, "MELEE", 12.0, MELEE)),
-                "no melee weapon: left exactly as PvP BOT has it");
+        assertEquals(Verdict.PUNCH_AND_CLOSE, OutOfAmmo.judge(new Facts(true, false, false, true, true, false, false, -1, "MELEE", 12.0, MELEE)),
+                "an archer with no melee weapon closes with an empty hand to punch");
+        assertEquals(Verdict.PUNCH_AND_CLOSE, OutOfAmmo.judge(new Facts(true, false, false, true, true, false, false, -1, "RANGED", 12.0, MELEE)),
+                "the fallback also overrides ranged mode, which otherwise stops at archer distance");
         assertEquals(Verdict.IDLE, OutOfAmmo.judge(new Facts(true, false, false, true, true, false, false, 0, null, 12.0, MELEE)),
                 "an unreadable mode");
         assertEquals(Verdict.IDLE, OutOfAmmo.judge(facts(12.0, "MACE")), "a mace or spear or crystal mode is not ours");

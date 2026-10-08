@@ -109,8 +109,10 @@ final class CombatHardeningSourceContractTest {
     @Test
     void rangedOptionShieldFallbackAndFootingChecksStayWired() throws IOException {
         String watcher = read("task/DangerWatcher.java");
-        assertTrue(watcher.contains("CombatTask.canShootFromWhereItStands(bot, target)"),
-                "an out-of-leash shootable hostile must not be held off");
+        assertTrue(watcher.contains("PvpBotCombatBrain.INSTANCE.tick(server, bot, aggressor)"),
+                "a factual vanilla aggro target must hand combat to the PvP BOT brain immediately");
+        assertFalse(watcher.contains("target_outside_leash"),
+                "defensive combat must not impose the retired owner-distance leash");
         String combat = read("task/CombatTask.java");
         assertTrue(combat.contains("&& !canShootFromWhereItStands(bot, target)"));
         assertTrue(combat.contains("StrikeLegality.shotRefusal(bot, target, RangedWeapon.shapeOf("),

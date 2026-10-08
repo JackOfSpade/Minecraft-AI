@@ -50,6 +50,44 @@ final class GatherMiningExplorationPrioritySourceContractTest {
     }
 
     @Test
+    void miningExplorationCommitsToItsMinedStairInsteadOfContourWalking() throws IOException {
+        String descent = Files.readString(TASKS.resolve("DescendToYTask.java"));
+
+        int flatStart = descent.indexOf("DetourEdge flatLandingEdge = new DetourEdge(feet, ahead);");
+        int climbStart = descent.indexOf("BlockPos climbTarget = ahead.above();", flatStart);
+        int miningStart = descent.indexOf("if (solid != null) {", climbStart);
+        assertTrue(flatStart >= 0 && climbStart > flatStart && miningStart > climbStart,
+                "the ordinary surface shortcuts and mined stair must remain separately ordered");
+
+        String flatShortcut = descent.substring(flatStart, climbStart);
+        String climbShortcut = descent.substring(climbStart, miningStart);
+        assertTrue(flatShortcut.contains("if (!miningExplorationChild")
+                        && flatShortcut.contains("descend_flat_landing"),
+                "a resource-seeking descent must not spend its work walking one flat surface cell at a time");
+        assertTrue(climbShortcut.contains("if (!miningExplorationChild")
+                        && climbShortcut.contains("descend_climb_over"),
+                "a resource-seeking descent must not climb the terrain instead of opening its stair");
+        assertTrue(descent.substring(miningStart).contains("beginMining(bot, solid);"),
+                "after the exploration-only shortcuts are skipped, the normal safe stair miner must own the next block");
+    }
+
+    @Test
+    void miningExplorationExplainsAnySafeStairRelocationToThePlayer() throws IOException {
+        String exploration = Files.readString(TASKS.resolve("MiningExplorationTask.java"));
+        String descent = Files.readString(TASKS.resolve("DescendToYTask.java"));
+
+        assertTrue(exploration.contains("BrainCoordinator.INSTANCE.sendBotReply(bot,")
+                        && exploration.contains("here. I'll open a safe staircase to look below.")
+                        && exploration.contains("names[0] + \" or \" + names[1]"),
+                "starting a below-surface resource search must announce its purpose in game chat");
+        int relocation = descent.indexOf("descend_fresh_entry_relocation");
+        int message = descent.indexOf("I found a safer nearby place to start the mine", relocation);
+        assertTrue(relocation >= 0 && message > relocation
+                        && descent.substring(relocation, message).contains("launched && miningExplorationChild"),
+                "an actual one-step relocation for mining exploration must tell the player why it is moving");
+    }
+
+    @Test
     void aMiningExplorationStaircaseHandsAnObservedOpenCaveBackToItsParent() throws IOException {
         String descent = Files.readString(TASKS.resolve("DescendToYTask.java"));
         int cavityHandoff = descent.indexOf("completeMiningExplorationAtObservedOpenCavity(bot, world, next)");

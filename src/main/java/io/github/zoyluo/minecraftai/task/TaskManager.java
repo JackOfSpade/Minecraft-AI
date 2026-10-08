@@ -239,6 +239,23 @@ public final class TaskManager {
         return stack == null ? Optional.empty() : stack.peek().map(ExecutionStack.Frame::work);
     }
 
+    /**
+     * True when a task type is live or retained beneath a temporary safety interrupt. This is
+     * intentionally broader than {@link #peekPaused(AIPlayerEntity)}: a player control mode must
+     * not silently disappear merely because lava or a shelter pushed another safety frame on top.
+     */
+    public boolean hasActiveOrPausedTask(AIPlayerEntity bot, Class<? extends Task> taskType) {
+        if (bot == null || taskType == null) {
+            return false;
+        }
+        Task current = active.get(bot.getUUID());
+        if (taskType.isInstance(current)) {
+            return true;
+        }
+        ExecutionStack<Task> stack = executionStacks.get(bot.getUUID());
+        return stack != null && stack.anyMatch(taskType::isInstance);
+    }
+
     public int pausedDepth(AIPlayerEntity bot) {
         ExecutionStack<Task> stack = executionStacks.get(bot.getUUID());
         return stack == null ? 0 : stack.size();

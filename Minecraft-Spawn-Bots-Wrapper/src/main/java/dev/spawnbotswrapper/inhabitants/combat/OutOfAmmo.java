@@ -12,7 +12,8 @@ import java.util.Locale;
  * returns without attacking or moving; the next tick it picks ranged mode again. A bot that carries a sword too holds its
  * empty bow forever. The fix has two halves: the managed setting {@code rangedRetreatOnClose=false} makes PvP BOT's own
  * melee mode win when the target is within twice its melee range, and this class decides when the addon has to close the
- * remaining gap itself: select the melee weapon and walk toward the target until PvP BOT's melee mode takes over.
+ * remaining gap itself: select the melee weapon and walk toward the target until PvP BOT's melee mode takes over. If the
+ * loadout has no melee weapon at all, it instead holds an empty hand and makes ordinary vanilla punches.
  * <p>
  * Melee scoring copies PvP BOT's own ({@code BotCombat.getMeleeScore}): swords, axes and the trident by base damage, a
  * sword +5 while its {@code preferSword} setting is on. A mace or a spear only counts when nothing scores.
@@ -97,7 +98,9 @@ public final class OutOfAmmo {
         /** Hold the melee weapon (moving it into the hotbar first when it sits in the main inventory), do not walk. */
         SELECT,
         /** Hold the melee weapon and walk toward the target. */
-        SELECT_AND_CLOSE
+        SELECT_AND_CLOSE,
+        /** Hold an empty hand, walk into reach, and let the caller deliver ordinary vanilla punches. */
+        PUNCH_AND_CLOSE
     }
 
     /**
@@ -123,7 +126,8 @@ public final class OutOfAmmo {
     /**
      * Decides one bot. Only a bot that PvP BOT would leave holding an empty ranged weapon is touched: it has a target, is
      * not retreating or eating, carries a bow or crossbow with ranged mode enabled, has no arrow and no bolt it can
-     * fire, and carries a melee weapon.
+     * fire. When it carries a melee weapon, the normal weapon-selection path applies. When it has only a ranged weapon,
+     * the empty-hand path closes distance instead so it can still punch.
      * <ul>
      *   <li>Within twice the melee range PvP BOT's own melee mode runs (the managed {@code rangedRetreatOnClose=false});
      *       it can only select a weapon that is in the hotbar, so a weapon in the main inventory is still brought up
@@ -136,8 +140,14 @@ public final class OutOfAmmo {
      */
     public static Verdict judge(Facts f) {
         if (!f.hasTarget() || !Boolean.FALSE.equals(f.retreating()) || f.busy() || !f.rangedEnabled()
-                || !f.carriesRanged() || f.hasAmmo() || f.loadedCrossbow() || f.meleeSlot() < 0 || f.mode() == null) {
+                || !f.carriesRanged() || f.hasAmmo() || f.loadedCrossbow() || f.mode() == null) {
             return Verdict.IDLE;
+        }
+        if (f.meleeSlot() < 0) {
+            return switch (f.mode()) {
+                case "RANGED", "MELEE" -> Verdict.PUNCH_AND_CLOSE;
+                default -> Verdict.IDLE;
+            };
         }
         if (f.distance() <= f.meleeRange() * 2.0) {
             return f.meleeSlot() >= 9 ? Verdict.SELECT : Verdict.IDLE;

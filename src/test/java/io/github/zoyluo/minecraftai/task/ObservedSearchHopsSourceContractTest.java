@@ -40,6 +40,10 @@ final class ObservedSearchHopsSourceContractTest {
         assertTrue(source.contains("retiredObservedGoals")
                         && source.contains("directional_hop_retired_observed_goal"),
                 "a locally observed goal that previously stalled must not be admitted into a repeat route");
+        assertTrue(source.contains("exploredLandingPatches")
+                        && source.contains("isPreviouslyExploredArea(observedGoal)")
+                        && source.contains("directional_hop_revisited_observed_area"),
+                "a later search episode must not turn a nearby already-surveyed landing into a return route");
         assertTrue(source.contains("private static final int[][] COMPASS"),
                 "an empty local view must still have a bounded, generic way to choose the next heading");
         assertFalse(source.contains("getBlockState("),
@@ -77,6 +81,7 @@ final class ObservedSearchHopsSourceContractTest {
                 "the task must retain the API-resolved local goal, never the remote heading");
         assertTrue(exploreMove.contains("bot.blockPosition().equals(exploreTarget)")
                         && exploreMove.contains("!bot.blockPosition().equals(exploreStart)")
+                        && exploreMove.contains("observedSearchHops.rememberExploredLanding(bot.blockPosition())")
                         && exploreMove.contains("gather_explore_arrived"),
                 "a completed hop must reach its exact admitted local goal after actual movement");
         assertFalse(exploreMove.contains("distSqr(exploreTarget) <= 9.0D"),
@@ -89,6 +94,10 @@ final class ObservedSearchHopsSourceContractTest {
                         && source.contains("no_observed_resource_in_local_view"),
                 "failure reporting must distinguish exhausted observed exploration from a local view, "
                         + "rather than asserting an unobserved resource absence");
+        String restart = methodBody(source, "private boolean continueAfterObservedSearchExhaustion(");
+        assertTrue(restart.contains("observedSearchHops.exploredLandingCount() <= observedSearchEpisodeStartLandings")
+                        && restart.contains("gather_observed_search_no_new_frontier"),
+                "an episode that reached no new search patch must stop rather than reopen the same loop");
     }
 
     @Test

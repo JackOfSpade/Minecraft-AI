@@ -153,7 +153,7 @@ final class GatherTreeRecoverySourceContractTest {
                 "a dig route that may place builds a stair or tower that nobody takes down, and the bot stays up on it"
                         + " (a log's pillar refused from one stance was followed by a Baritone-built tower of seven dirt"
                         + " and a bot that never came down); the gather's dig approach only breaks");
-        assertTrue(gather.contains("startTunnelPathTo(tree)") && gather.contains("startTunnelPathTo(targetPos)"),
+        assertTrue(gather.contains("startTunnelPathTo(target)") && gather.contains("startTunnelPathTo(targetPos)"),
                 "both dig approaches of the gather use the route that places nothing");
         String tunnel = methodBody(pack, "public ActionResult startTunnelPathTo(");
         assertTrue(tunnel.contains("routeOnBaritone(\"dig_path_to\", goal, false, true, 0, RouteConstraints.unrestricted())")

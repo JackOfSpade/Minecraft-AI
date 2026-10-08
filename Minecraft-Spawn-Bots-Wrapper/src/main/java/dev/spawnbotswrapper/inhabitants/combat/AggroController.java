@@ -23,7 +23,7 @@ import java.util.function.Supplier;
 
 /**
  * The "line of sight hunter" of the hostile inhabitants: what they do about players (and their companions), decided by
- * what they can SEE and HEAR. The one hard-coded distance rule is the ENGAGE LIMIT ({@link #ENGAGE_LIMIT}, 64 blocks):
+ * what they can SEE and HEAR. The one hard-coded distance rule is the ENGAGE LIMIT ({@link #ENGAGE_LIMIT}, 32 blocks):
  * sight has no block limit in the view cone, but a bot never engages a target it sees (and measures) farther away.
  * <pre>
  *   IDLE --(noticed)--&gt; CHASE --(lost)--&gt; PURSUE --(arrived or blocked)--&gt; SEARCH --(10 s)--&gt; RETURN --(home)--&gt; IDLE
@@ -36,7 +36,7 @@ import java.util.function.Supplier;
  * (last known position, search, walk home); only a death or disappearance the bot SEES ends the engagement at once.
  * <p>
  * <b>Noticing</b> is {@link Perception}: a player that stays in view for the reaction time (a continuous formula in seconds:
- * 0.5 s up close, 2.0 s at 64 blocks, longer at an angle, sneaking or hard to see; nothing is seen behind) is noticed. Sounds
+ * 0.5 s up close, 2.0 s at 32 blocks, longer at an angle, sneaking or hard to see; nothing is seen behind) is noticed. Sounds
  * come from vanilla's own vibration system (radius, sneaking and wool are vanilla rules): a sound whose source is in clear
  * view counts as sight without the view cone (the bot turned to it); a sound out of sight is only a place to investigate
  * (idle: turn and look; pursue/search: the search focus moves there). A bot engages only once it SEES the target.

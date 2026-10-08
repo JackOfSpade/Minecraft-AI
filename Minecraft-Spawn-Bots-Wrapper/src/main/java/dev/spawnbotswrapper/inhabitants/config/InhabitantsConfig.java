@@ -146,7 +146,7 @@ public final class InhabitantsConfig {
      * can exclude the ranges wanted here (the shipped 8/12/16 happen to sit inside them, but the mechanism stays field writes).  A
      * managed value may therefore deliberately lie outside a setter clamp; PvP BOT itself never re-validates a loaded value.
      * <ul>
-     *   <li>{@link #maxTargetDistance} - PvP BOT's targeting radius (blocks, allowed 4..128). Shipped 64 = the ENGAGE LIMIT of the
+     *   <li>{@link #maxTargetDistance} - PvP BOT's targeting radius (blocks, allowed 4..128). Shipped 32 = the ENGAGE LIMIT of the
      *       aggro controller (the one hard-coded distance rule: a target seen farther away is never engaged), so PvP BOT
      *       only has to cover what may be engaged. Line of sight decides who is chased.</li>
      *   <li>{@link #rangedMinRange}, {@link #rangedOptimalRange}, {@link #rangedMaxRange} - archer distances. Must satisfy
@@ -193,11 +193,11 @@ public final class InhabitantsConfig {
         public PvpbotSettings() {
         }
 
-        /** The values the addon ships with: PvP BOT's targeting radius at the 64-block engage limit (line of sight decides who is chased), PvP BOT's own target
+        /** The values the addon ships with: PvP BOT's targeting radius at the 32-block engage limit (line of sight decides who is chased), PvP BOT's own target
          * acquisition off (the aggro controller acquires), archers at 8/12/16 and no weapon auto-equip. */
         public static PvpbotSettings shipped() {
             PvpbotSettings s = new PvpbotSettings();
-            s.maxTargetDistance = 64.0;
+            s.maxTargetDistance = 32.0;
             s.rangedMinRange = 8.0;
             s.rangedOptimalRange = 12.0;
             s.rangedMaxRange = 16.0;
@@ -490,10 +490,10 @@ public final class InhabitantsConfig {
     /**
      * How the hostile inhabitants hunt players and their companions (see {@code AggroController}); everything is decided
      * by what they SEE and HEAR. Sight has no block limit inside the view cone; the one hard-coded distance rule is the
-     * ENGAGE LIMIT of 64 blocks (a constant, not a setting): a target the bot sees farther away is never engaged.
+     * ENGAGE LIMIT of 32 blocks (a constant, not a setting): a target the bot sees farther away is never engaged.
      * <ul>
      *   <li><b>Noticing.</b> A player is noticed after staying in view for a reaction time that is one continuous formula
-     *       (see {@link AggroPerception}): 0.5 s up close, 2.0 s at 64 blocks, longer at an angle, sneaking or when
+     *       (see {@link AggroPerception}): 0.5 s up close, 2.0 s at 32 blocks, longer at an angle, sneaking or when
      *       hard to see. Nothing is seen behind. Sounds are vanilla vibrations (see {@link AggroHearing}).</li>
      *   <li><b>Chase.</b> While the target is in sight (occlusion only) the inhabitant chases; the fight starts only after
      *       the reaction time, and again after EVERY re-sighting. Not in sight for {@link #loseGraceTicks} (10 = 0.5 s) it has
@@ -548,7 +548,7 @@ public final class InhabitantsConfig {
         public boolean enabled = true;
         /** Seconds a player right in front must stay in view before an inhabitant reacts (a human's reaction). Range 0..10. */
         public double reactionBaseSeconds = 0.5;
-        /** Seconds the same takes for a player 64 blocks away; in between it rises linearly. Range base..30. */
+        /** Seconds the same takes for a player at the legacy 64-block reaction measurement; the target-engagement cap is separately 32 blocks. Range base..30. */
         public double reactionAt64Seconds = 2.0;
         /** Half-angle (degrees) of the cone in which the plain reaction time applies. Range 0..180. */
         public double fullAttentionHalfAngleDeg = 30.0;

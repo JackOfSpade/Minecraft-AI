@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.action.ActionResult;
+import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mining.MiningChain;
@@ -211,11 +212,32 @@ public final class MiningExplorationTask extends AbstractTask {
         if (!startDescent(bot, "mining_exploration_start_failed")) {
             return;
         }
+        BrainCoordinator.INSTANCE.sendBotReply(bot,
+                "I can't see " + requestedResourceName()
+                        + " here. I'll open a safe staircase to look below.");
         BotLog.action(bot, "mining_exploration_started",
                 "resource", resourceLabel.isBlank() ? "unknown" : resourceLabel,
                 "from_y", currentY,
                 "target_y", targetY,
                 "mode", geologicalProbe ? "geological_probe" : "ore_depth");
+    }
+
+    private String requestedResourceName() {
+        String[] names = requestedBlocks.stream()
+                .map(block -> BuiltInRegistries.BLOCK.getKey(block).getPath().replace('_', ' '))
+                .sorted()
+                .toArray(String[]::new);
+        if (names.length == 0) {
+            return "the requested resource";
+        }
+        if (names.length == 1) {
+            return names[0];
+        }
+        if (names.length == 2) {
+            return names[0] + " or " + names[1];
+        }
+        return String.join(", ", java.util.Arrays.copyOf(names, names.length - 1))
+                + ", or " + names[names.length - 1];
     }
 
     @Override
