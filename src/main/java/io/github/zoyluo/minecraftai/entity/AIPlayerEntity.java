@@ -424,6 +424,17 @@ public class AIPlayerEntity extends ServerPlayer {
         super.die(source);
     }
 
+    /**
+     * Companions revive beside their owner after the configured cooldown, with their exact
+     * carried and equipped loadout. Vanilla routes a player's entire inventory through this
+     * method when {@code keepInventory} is false, so letting it run would create a corpse drop
+     * and leave the companion naked before its deterministic revive.
+     */
+    @Override
+    protected void dropEquipment(ServerLevel level) {
+        // Intentionally empty: companion inventory and equipment never leave the companion on death.
+    }
+
     @Override
     public String getIpAddress() {
         return "127.0.0.1";

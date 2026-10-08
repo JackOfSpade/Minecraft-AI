@@ -143,7 +143,9 @@ public final class ShieldGuard {
     public enum Owner {
         NONE,
         REACTIVE,
-        TASK
+        TASK,
+        /** The optional PvP BOT combat bridge holds between its melee swings. */
+        PVP_BRAIN
     }
 
     /** The outcome of one raise attempt. */
@@ -396,6 +398,45 @@ public final class ShieldGuard {
             state.taskRetryAt = now + RETRY_TICKS;
         }
         return true;
+    }
+
+    /**
+     * The PvP BOT bridge replaces {@link CombatTask}'s attack loop, so it cannot use that task's
+     * normal between-swings shield rhythm. Give it the same vanilla block windows: lower the
+     * shield only for a ready, legal strike, and otherwise hold it against a close, noticed melee
+     * attacker. This runs immediately before PvP BOT's own combat update.
+     */
+    static void preparePvpBrainMeleeBlock(AIPlayerEntity bot, LivingEntity attacker) {
+        State state = INSTANCE.stateOf(bot);
+        if (!meleeShieldEligible(bot, attacker)) {
+            lowerIfOwner(bot, Owner.PVP_BRAIN);
+            return;
+        }
+        boolean readyStrike = bot.getAttackStrengthScale(0.5F) >= 0.95F
+                && HumanAim.isUnderCrosshair(bot, attacker)
+                && StrikeLegality.strikeRefusal(bot, attacker) == null;
+        if (readyStrike) {
+            lowerIfOwner(bot, Owner.PVP_BRAIN);
+            return;
+        }
+        // PvP BOT makes the final aim adjustment in the update directly after this call. Turning
+        // now starts the shield's front-arc alignment without inventing an instant facing change.
+        HumanAim.lookToward(bot, attacker.getEyePosition());
+        long now = bot.level().getGameTime();
+        if (now < state.taskRetryAt || usingShield(bot)) {
+            if (usingShield(bot)) {
+                state.owner = Owner.PVP_BRAIN;
+            }
+            return;
+        }
+        if (raise(bot, Owner.PVP_BRAIN) == Raise.REFUSED) {
+            state.taskRetryAt = now + RETRY_TICKS;
+        }
+    }
+
+    /** Stops only a shield hold initiated for the optional PvP BOT combat bridge. */
+    static void releasePvpBrainMeleeBlock(AIPlayerEntity bot) {
+        lowerIfOwner(bot, Owner.PVP_BRAIN);
     }
 
     /**

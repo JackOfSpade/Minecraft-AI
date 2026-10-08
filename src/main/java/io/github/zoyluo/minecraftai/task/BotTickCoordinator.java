@@ -19,6 +19,12 @@ public final class BotTickCoordinator {
         io.github.zoyluo.minecraftai.action.ContainerAction.tickPersistence(server);
         TpsGuard guard = TpsGuard.INSTANCE;
         for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
+            // Death recovery must not wait for the adaptive danger-scan interval. It also owns
+            // the whole tick while the companion is dead, so no navigation, equipment, shield or
+            // goal code can act on a zero-health fake player.
+            if (DangerWatcher.INSTANCE.tickDeathRespawn(server, bot)) {
+                continue;
+            }
             boolean runDanger = tick % guard.dangerScanInterval(bot.getUUID()) == 0;
             boolean runBackground = tick % guard.scanInterval(bot.getUUID()) == 0;
             // Realistic perception (docs/PERCEPTION.md): what this bot has noticed, read once per tick before anything asks. It never

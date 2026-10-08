@@ -62,12 +62,14 @@ final class PvpBotCombatBrain {
             String name = bot.getGameProfile().name();
             Object state = current.getState.invoke(null, name);
             if (state == null) {
+                ShieldGuard.releasePvpBrainMeleeBlock(bot);
                 return false;
             }
             // Beyond PvP BOT's own engagement horizon, use its navigation primitive only. Calling
             // update there would let a server's optional auto-target setting pick an unrelated
             // player before the injected aggressor comes back in range.
             if (bot.distanceToSqr(aggressor) > DIRECT_COMBAT_RANGE * DIRECT_COMBAT_RANGE) {
+                ShieldGuard.releasePvpBrainMeleeBlock(bot);
                 if (current.moveTowardPosition == null) {
                     return false;
                 }
@@ -75,6 +77,7 @@ final class PvpBotCombatBrain {
                 activeBots.add(bot.getUUID());
                 return true;
             }
+            ShieldGuard.preparePvpBrainMeleeBlock(bot, aggressor);
             current.lastAttacker.set(state, aggressor);
             if (current.lastAttackTime != null) {
                 // PvP BOT compares this field with System.currentTimeMillis(), not Minecraft
@@ -88,12 +91,14 @@ final class PvpBotCombatBrain {
             // rather than letting any PvP BOT auto-target setting turn on the player or a bystander.
             if (current.target != null && current.target.get(state) != aggressor) {
                 current.clearTarget.invoke(null, name);
+                ShieldGuard.releasePvpBrainMeleeBlock(bot);
                 activeBots.remove(bot.getUUID());
                 return false;
             }
             activeBots.add(bot.getUUID());
             return true;
         } catch (Throwable failure) {
+            ShieldGuard.releasePvpBrainMeleeBlock(bot);
             activeBots.remove(bot.getUUID());
             if (reportedFailures.add(bot.getUUID())) {
                 BotLog.error(bot, "pvp_bot_combat_bridge_failed", failure,
@@ -105,6 +110,7 @@ final class PvpBotCombatBrain {
 
     /** Stop only a combat session started by this bridge, leaving genuine PvP BOT players alone. */
     void release(AIPlayerEntity bot) {
+        ShieldGuard.releasePvpBrainMeleeBlock(bot);
         if (!activeBots.remove(bot.getUUID())) {
             return;
         }

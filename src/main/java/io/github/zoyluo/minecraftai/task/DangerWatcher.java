@@ -54,7 +54,7 @@ public final class DangerWatcher {
     private final Map<UUID, Integer> nextFollowKeepLogTick = new ConcurrentHashMap<>();
     /** The answer a bot was last given for the dark trap cell it stands in, so an unchanged situation is not announced again. */
     private final Map<UUID, DarkTrapAnswer> darkTrapAnswers = new ConcurrentHashMap<>();
-    /** Deaths wait out their one-minute cooldown here; entries leave only after a successful revive. */
+    /** Deaths wait out their ten-second cooldown here; entries leave only after a successful revive. */
     private final Map<UUID, PendingRespawn> pendingRespawns = new ConcurrentHashMap<>();
     /**
      * An aggro target handed to PvP BOT. Keeping this reference is not a distance rule: it lasts
@@ -87,8 +87,8 @@ public final class DangerWatcher {
     private static final double CLOSE_DEFENSIVE_HOSTILE_RADIUS = CombatCore.ATTACK_RANGE + 2.0D;
     /** A loaded hostile that has selected a player can remain aggroed around a corner; this is sensing only, never a chase leash. */
     private static final double VANILLA_AGGRO_SCAN_RADIUS = 128.0D;
-    /** One real-time minute at Minecraft's normal 20 ticks per second. */
-    static final int DEATH_RESPAWN_COOLDOWN_TICKS = 20 * 60;
+    /** Ten real-time seconds at Minecraft's normal 20 ticks per second. */
+    static final int DEATH_RESPAWN_COOLDOWN_TICKS = 20 * 10;
 
     private DangerWatcher() {
     }
@@ -195,8 +195,15 @@ public final class DangerWatcher {
         return new DropRecoveryDecision(true, "short_clear_route");
     }
 
-    public boolean scanBot(MinecraftServer server, AIPlayerEntity bot) {
-        // A dead bot owns no safety work. It waits one minute, then revives beside its owner (or another real online player),
+    /**
+     * The death path runs every server tick, independently of the adaptive danger-scan cadence.
+     * A dead companion therefore cannot be stranded when the danger watcher is deliberately
+     * throttled under load.
+     *
+     * @return true while the bot is dead, including the tick in which it is revived
+     */
+    public boolean tickDeathRespawn(MinecraftServer server, AIPlayerEntity bot) {
+        // A dead bot owns no safety work. It waits ten seconds, then revives beside its owner (or another real online player),
         // rather than instantly reappearing at world spawn and trying to recover from there.
         // isAlive() alone is not a death signal: it also goes false when the entity is removed for
         // a non-death reason (e.g. chunk unload), same pitfall documented in HuntTask's
@@ -219,35 +226,23 @@ public final class DangerWatcher {
                 return true;
             }
             pendingRespawns.remove(bot.getUUID());
-            // Death-recovery reflex: dropped gear sits at the death point (despawns in 5 minutes); a
-            // real player's first instinct is to run back for it ("corpse run").
-            // Only a short, shallow route with an already-clear death site auto-runs the corpse.
-            // Strict survival has no teleport; digging straight back down to a deep mine naked from
-            // the world spawn point has no provable entry route, and risks dying again before the
-            // drops despawn. Deep-mine recovery must wait for a future persisted, reversible
-            // entry/trail contract; for now, fail closed and immediately restart the original
-            // Mission, rebuilding supplies from the surface.
-            boolean dangerous = io.github.zoyluo.minecraftai.memory.KnowledgeBase.INSTANCE
-                    .isDanger(bot.getUUID(), pending.deathPos());
-            DropRecoveryDecision recovery = dropRecoveryDecision(
-                    bot.blockPosition(), pending.deathPos(), pending.visibleHostilesAtDeath(), dangerous);
-            if (recovery.allowed()) {
-                TaskManager.INSTANCE.assign(bot, new RecoverDropsTask(pending.deathPos(), pending.deathTick()), TaskOrigin.safety("recover_drops"));
-            } else {
-                BotLog.danger(bot, "drop_recovery_skipped",
-                        "death", pending.deathPos().toShortString(),
-                        "respawn", bot.blockPosition().toShortString(),
-                        "hostiles", pending.visibleHostilesAtDeath(),
-                        "reason", recovery.reason());
-            }
+            // Companion deaths retain every inventory and equipment stack, so a corpse run is
+            // both unnecessary and dangerous: the revived bot should stay with its owner.
             BrainCoordinator.INSTANCE.sendBotReply(bot, "I'm back, "
                     + anchor.get().getGameProfile().name() + "! Ready to help.");
             BotLog.lifecycle(bot, "bot_respawn_greeting",
                     "owner", anchor.get().getGameProfile().name(),
-                    "recovery", recovery.reason());
+                    "inventory_retained", true);
             return true;
         }
         pendingRespawns.remove(bot.getUUID());
+        return false;
+    }
+
+    public boolean scanBot(MinecraftServer server, AIPlayerEntity bot) {
+        if (tickDeathRespawn(server, bot)) {
+            return true;
+        }
         // combat-dangerwatcher-repeated-hostile-scans: observableActiveHostilePressure(bot) does an
         // entity-class world query plus a per-candidate observability/LOS raycast, and used to be
         // recomputed independently by collectTopThreat, refreshShelterEpisode (unconditionally,

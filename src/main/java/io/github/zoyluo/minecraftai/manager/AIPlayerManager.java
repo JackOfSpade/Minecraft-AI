@@ -113,6 +113,11 @@ public final class AIPlayerManager {
                 respawnStrategy = "strict_world_spawn";
             }
         }
+        // A normal ServerPlayer waits for its client to send the respawn packet. A companion has
+        // no client, and some death sources leave its fake-player entity marked removed; reopen
+        // that entity before changing health/position so the lifecycle never depends on a client
+        // packet that will not arrive.
+        bot.reviveForMinecraftAiSpawn();
         bot.setHealth(20.0F);
         bot.deathTime = 0;
         applyVanillaRespawnState(bot);
