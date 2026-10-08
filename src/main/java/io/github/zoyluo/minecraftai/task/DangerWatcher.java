@@ -331,12 +331,12 @@ public final class DangerWatcher {
         // descent, but a generic underground Evade has no proven surface destination and can leave
         // the return owner paused forever while the same source remains visible. Let the active
         // owner turn around, or resume the exact paused owner once any prior safety task has ended.
-        Task digDownCandidate = active.filter(DigDownTask.class::isInstance)
-                .orElseGet(() -> active.isEmpty()
-                        ? TaskManager.INSTANCE.peekPaused(bot)
-                        .filter(DigDownTask.class::isInstance)
-                        .orElse(null)
-                        : null);
+        Task digDownCandidate = active.filter(DigDownTask.class::isInstance).orElse(null);
+        if (digDownCandidate == null && active.isEmpty()) {
+            digDownCandidate = TaskManager.INSTANCE.peekPaused(bot)
+                    .filter(DigDownTask.class::isInstance)
+                    .orElse(null);
+        }
         boolean pausedDigDownCanResume = active.isEmpty()
                 && !TaskManager.INSTANCE.isUserPaused(bot)
                 && !bot.getActionPack().hasActiveActions()
