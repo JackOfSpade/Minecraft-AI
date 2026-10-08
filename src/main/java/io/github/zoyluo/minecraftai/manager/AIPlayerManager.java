@@ -113,16 +113,20 @@ public final class AIPlayerManager {
                 respawnStrategy = "strict_world_spawn";
             }
         }
-        // A normal ServerPlayer waits for its client to send the respawn packet. A companion has
-        // no client, and some death sources leave its fake-player entity marked removed; reopen
-        // that entity before changing health/position so the lifecycle never depends on a client
-        // packet that will not arrive.
-        bot.reviveForMinecraftAiSpawn();
+        // A normal ServerPlayer is replaced by a fresh, chunk-tracked entity after its client asks
+        // to respawn. A companion must retain this entity (and therefore its inventory), so pause
+        // its fake-client chunk movement until the retained entity's player ticket is rebuilt after
+        // the respawn teleport.
+        bot.prepareMinecraftAiDeathRespawn();
         bot.setHealth(20.0F);
         bot.deathTime = 0;
         applyVanillaRespawnState(bot);
-        bot.teleportTo(respawnWorld, respawnPos.x, respawnPos.y, respawnPos.z,
-                Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+        try {
+            bot.teleportTo(respawnWorld, respawnPos.x, respawnPos.y, respawnPos.z,
+                    Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+        } finally {
+            bot.completeMinecraftAiDeathRespawn();
+        }
         bot.clearFire();
         BotLog.danger(bot, "bot_respawned_after_death",
                 "pos", LogFields.pos(bot.blockPosition()),

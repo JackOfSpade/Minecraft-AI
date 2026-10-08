@@ -31,7 +31,8 @@ import net.minecraft.world.entity.LivingEntity;
  * A mark lasts {@code behaviour.targeting.aggressorMemoryTicks} (600) level game ticks after the last qualifying act and is cleared
  * when the aggressor dies or the server stops. The ledger is GLOBAL, keyed by the aggressor's UUID: an aggressor that hit one owner's
  * bot is a target for every Minecraft-AI bot that sees it. MARKED entries also remember the protected victim(s) of the qualifying
- * act so the attacked companion or owner can switch to the combat brain immediately, even before line of sight is available.
+ * act so the attacked companion or owner can switch to the combat brain immediately when that companion has a clear physical line
+ * of sight to the aggressor.
  *
  * <p>{@link Core} is the pure part (UUIDs and game ticks only). The adapters below read the config, the level game time and the
  * player kinds. Time is ALWAYS the level game time ({@code level.getGameTime()}); a mock player's {@code tickCount} never advances.</p>
@@ -262,14 +263,18 @@ public final class HostileBotLedger {
 
     /**
      * True if a marked foreign PvP bot's qualifying act targeted this companion or the player who owns it. Unlike
-     * {@link #isVisibleAggressor(AIPlayerEntity, ServerPlayer)}, this deliberately has no sight or distance clause: it is the
-     * factual aggro signal that activates the defensive PvP brain, including through a wall.
+     * {@link #isVisibleAggressor(AIPlayerEntity, ServerPlayer)}, this bypasses normal perception's view cone, reaction delay and
+     * distance shaping, but it still requires this companion's direct physical line of sight. This is the combat-only 360-degree
+     * sight rule; it never permits combat through a wall and does not change ordinary perception.
      */
     public static boolean isMarkedAgainst(AIPlayerEntity bot, ServerPlayer player) {
         if (bot == null || player == null || player == bot || CORE.isEmpty() || !hostileBotsEnabled()) {
             return false;
         }
         if (player.level() != bot.level() || !player.isAlive() || !isMarkableForeignBot(player)) {
+            return false;
+        }
+        if (!CombatCore.hasLineOfSight(bot, player)) {
             return false;
         }
         long now = bot.level().getGameTime();

@@ -166,8 +166,9 @@ public final class HostileBotIntent {
             }
             // The wrapper owns the hostile PvP bot's target state. It has already applied its own
             // observation and reaction rules, so this is a factual aggro relationship—not an
-            // omniscient proximity guess. Mark it before the companion-perception gate: defensive
-            // combat must start even when the attacker is currently around a corner.
+            // omniscient proximity guess. Record it before the companion-perception gate; the
+            // combat handoff separately requires the defending companion's direct 360-degree
+            // physical line of sight, without changing normal perception.
             markWrapperAggroTargets(aggressor, victims, now);
             if (!perceived(aggressor, observers)) {
                 // Nobody on the protected side has noticed this player (no bot has seen or heard it, no owner is looking at it): its

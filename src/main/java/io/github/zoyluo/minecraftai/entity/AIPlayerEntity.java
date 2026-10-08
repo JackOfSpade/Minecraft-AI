@@ -9,6 +9,7 @@ import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenFactory;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mixin.ChunkMapPlayerStatusInvokerMixin;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavigationControllerOwner;
 import io.github.zoyluo.minecraftai.navigation.NavigationMeasurement;
@@ -37,6 +38,10 @@ public class AIPlayerEntity extends ServerPlayer {
     private boolean teleportedThisTick;
     // Nesting of the overridden teleport calls (see auditTeleport).
     private int teleportAuditDepth;
+    // A death-recovery teleport must not move the player in the chunk map until its player ticket
+    // has been rebuilt. Vanilla normally does that while constructing a replacement ServerPlayer;
+    // companions intentionally retain their entity and inventory instead.
+    private boolean chunkTrackingSuspendedForRespawn;
 
     public AIPlayerEntity(MinecraftServer server,
                           ServerLevel world,
@@ -55,9 +60,9 @@ public class AIPlayerEntity extends ServerPlayer {
         // send those, so do it every tick here instead of the old 10-tick throttle (0.5s), which was a
         // plausible source of visible movement choppiness with no real cost to justify it (cheap,
         // O(tracked entities) bookkeeping unrelated to pathfinding/mining).
-        if (this.connection != null) {
+        if (this.connection != null && !this.chunkTrackingSuspendedForRespawn) {
             this.connection.resetPosition();
-            this.level().getChunkSource().move(this);
+            settleChunkTracking();
         }
 
         this.fallChecked = false;
@@ -274,9 +279,37 @@ public class AIPlayerEntity extends ServerPlayer {
      * at once (a restored mission, a recovery after respawn) would refuse its first route as unobserved.
      */
     private void settleChunkTracking() {
-        if (this.connection != null && !this.isRemoved()) {
+        if (!this.chunkTrackingSuspendedForRespawn && this.connection != null && !this.isRemoved()) {
             this.level().getChunkSource().move(this);
         }
+    }
+
+    /**
+     * Pauses the bot-only calls to {@code ServerChunkCache.move} while death recovery relocates this
+     * retained fake-player entity. A vanilla player gets a new entity during respawn; this bot keeps
+     * its inventory and equipment, so its old chunk ticket must be rebuilt explicitly afterwards.
+     */
+    public void prepareMinecraftAiDeathRespawn() {
+        this.chunkTrackingSuspendedForRespawn = true;
+        this.unsetRemoved();
+    }
+
+    /**
+     * Recreates the same chunk-map player registration that vanilla performs for a fresh respawned
+     * player, then safely centres it on the destination. Removing the stale registration first is
+     * deliberately harmless when death already removed it, and prevents DistanceManager from trying
+     * to remove a missing old ticket during the first post-death movement.
+     */
+    public void completeMinecraftAiDeathRespawn() {
+        if (this.connection == null || this.isRemoved()) {
+            return;
+        }
+        ChunkMapPlayerStatusInvokerMixin chunkMap =
+                (ChunkMapPlayerStatusInvokerMixin) (Object) this.level().getChunkSource().chunkMap;
+        chunkMap.minecraftai$updatePlayerStatus(this, false);
+        chunkMap.minecraftai$updatePlayerStatus(this, true);
+        this.chunkTrackingSuspendedForRespawn = false;
+        settleChunkTracking();
     }
 
     /**

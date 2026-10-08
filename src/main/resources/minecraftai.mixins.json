@@ -18,6 +18,7 @@
     "SleepManagerHumansOnlyMixin",
     "PhantomSpawnerHumansOnlyMixin",
     "ChunkMapVisibleChunksAccessorMixin",
+    "ChunkMapPlayerStatusInvokerMixin",
     "ServerChunkCacheBaritoneMixin",
     "BaritonePalettedContainerMixin",
     "BaritonePalettedContainerDataMixin",

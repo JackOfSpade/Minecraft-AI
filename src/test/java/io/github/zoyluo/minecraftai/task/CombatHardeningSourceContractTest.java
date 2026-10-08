@@ -111,6 +111,8 @@ final class CombatHardeningSourceContractTest {
         String watcher = read("task/DangerWatcher.java");
         assertTrue(watcher.contains("PvpBotCombatBrain.INSTANCE.tick(server, bot, aggressor)"),
                 "a factual vanilla aggro target must hand combat to the PvP BOT brain immediately");
+        assertTrue(read("task/HostileBotLedger.java").contains("CombatCore.hasLineOfSight(bot, player)"),
+                "the foreign-PvP-bot combat handoff must require the companion's direct physical line of sight");
         assertFalse(watcher.contains("target_outside_leash"),
                 "defensive combat must not impose the retired owner-distance leash");
         String combat = read("task/CombatTask.java");

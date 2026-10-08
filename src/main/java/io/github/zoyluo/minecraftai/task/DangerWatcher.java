@@ -1612,8 +1612,8 @@ public final class DangerWatcher {
 
     /**
      * Finds a loaded mob whose own vanilla goal targets this companion or its owner, or a marked foreign PvP bot whose
-     * qualifying act targeted either protected victim. It intentionally does not consult sight, recent damage, or the old
-     * owner-radius leash.
+     * qualifying act targeted either protected victim. The foreign-PvP-bot relation itself uses its companion-only 360-degree
+     * physical sight check; this finder otherwise does not consult perception, recent damage, or the old owner-radius leash.
      */
     private static Optional<LivingEntity> immediateAggressor(AIPlayerEntity bot) {
         if (bot.level().getServer() == null) {
@@ -1661,7 +1661,7 @@ public final class DangerWatcher {
                 .orElse(false);
     }
 
-    /** True only for a factual vanilla aggro relation or a per-victim foreign-PvP-bot mark, with no sight or distance clause. */
+    /** True only for a factual vanilla aggro relation or a per-victim foreign-PvP-bot mark with its combat-only sight rule. */
     private static boolean isAggroTargetingBotOrOwner(AIPlayerEntity bot, LivingEntity aggressor) {
         if (aggressor instanceof net.minecraft.server.level.ServerPlayer player) {
             return HostileBotLedger.isMarkedAgainst(bot, player);
