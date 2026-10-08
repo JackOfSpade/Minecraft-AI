@@ -38,14 +38,22 @@ import io.github.zoyluo.minecraftai.persist.BotPersistence;
 import io.github.zoyluo.minecraftai.task.DangerWatcher;
 import io.github.zoyluo.minecraftai.task.EmergencyShelterTask;
 import io.github.zoyluo.minecraftai.task.EpisodeMemory;
+import io.github.zoyluo.minecraftai.task.FollowTask;
 import io.github.zoyluo.minecraftai.task.NavSafetyNet;
 import io.github.zoyluo.minecraftai.task.StuckWatcher;
 import io.github.zoyluo.minecraftai.task.TaskManager;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 
 /** Single ordering authority for world start/stop and Bot reset/death/despawn cleanup. */
 public final class RuntimeLifecycleCoordinator {
     public static final RuntimeLifecycleCoordinator INSTANCE = new RuntimeLifecycleCoordinator();
+    /** A direct player follow is a recoverable companion intent, unlike arbitrary interrupted work. */
+    private static final Map<java.util.UUID, TaskManager.FollowIntent> FOLLOW_AFTER_DEATH = new ConcurrentHashMap<>();
+    /** Companions whose owner died stay in local defense/hold mode until the owner gives them a new direction. */
+    private static final Map<java.util.UUID, java.util.UUID> OWNER_DEATH_WATCH = new ConcurrentHashMap<>();
 
     private RuntimeLifecycleCoordinator() {
     }
@@ -99,6 +107,14 @@ public final class RuntimeLifecycleCoordinator {
     }
 
     public void onBotDeath(AIPlayerEntity bot) {
+        // Capture this before the generic death reset drains both the active task and its safety
+        // pause stack. A Mission restores through GoalExecutor's durable checkpoint instead.
+        FOLLOW_AFTER_DEATH.remove(bot.getUUID());
+        if (!TaskManager.INSTANCE.isUserPaused(bot)) {
+            TaskManager.INSTANCE.activeOrPausedFollowIntent(bot)
+                    .filter(intent -> intent.origin() == null || intent.origin().kind() != TaskOrigin.Kind.MISSION)
+                    .ifPresent(intent -> FOLLOW_AFTER_DEATH.put(bot.getUUID(), intent));
+        }
         BrainCoordinator.INSTANCE.invalidateDecision(bot, "bot_death");
         BrainCoordinator.INSTANCE.clearIntentWakeSources(bot);
         // A death interrupts but does not erase a long-running Mission. GoalExecutor persists the
@@ -113,12 +129,77 @@ public final class RuntimeLifecycleCoordinator {
         BotLog.lifecycle(bot, "bot_runtime_death_reset");
     }
 
+    /**
+     * A companion does not try to follow its dead owner or wander into a new job. It may finish
+     * a live safety fight, then DangerWatcher gives it a permanent local hold until its owner
+     * explicitly directs it again.
+     */
+    public void onOwnerDeath(ServerPlayer owner) {
+        if (owner == null || owner instanceof AIPlayerEntity) {
+            return;
+        }
+        int companions = 0;
+        for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.botsOf(owner.getUUID())) {
+            OWNER_DEATH_WATCH.put(bot.getUUID(), owner.getUUID());
+            // A fight/shelter already keeping the companion alive remains in control, but any
+            // follow or mission beneath it must not resume toward a dead player afterward.
+            TaskManager.INSTANCE.cancelIntentTasksKeepingActiveCombatOrSafety(bot, "owner_died");
+            BotLog.lifecycle(bot, "companion_owner_death_watch",
+                    "owner", owner.getGameProfile().name(),
+                    "mode", "fight_then_hold");
+            companions++;
+        }
+        if (companions > 0) {
+            BotLog.lifecycle("companion_owner_death_watch_started",
+                    "owner", owner.getGameProfile().name(), "companions", companions);
+        }
+    }
+
+    /** True while this companion must defend locally and then wait, instead of resuming old work. */
+    public boolean awaitingOwnerReturn(AIPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        return AIPlayerManager.INSTANCE.ownerOf(bot)
+                .filter(owner -> owner.equals(OWNER_DEATH_WATCH.get(bot.getUUID())))
+                .isPresent();
+    }
+
+    /** A new owner-issued direction is the intentional exit from the post-death local hold. */
+    public void clearOwnerDeathWatch(AIPlayerEntity bot, String reason) {
+        if (bot != null && OWNER_DEATH_WATCH.remove(bot.getUUID()) != null) {
+            BotLog.lifecycle(bot, "companion_owner_death_watch_cleared",
+                    "reason", reason == null ? "new_owner_direction" : reason);
+        }
+    }
+
+    /** Restores an interrupted direct follow after the retained fake player has been revived. */
+    public void onBotRespawned(AIPlayerEntity bot) {
+        TaskManager.FollowIntent intent = FOLLOW_AFTER_DEATH.remove(bot.getUUID());
+        if (intent == null || !bot.isAlive()) {
+            return;
+        }
+        if (awaitingOwnerReturn(bot)) {
+            BotLog.lifecycle(bot, "companion_waiting_for_owner_after_death");
+            return;
+        }
+        TaskOrigin origin = intent.origin() == null
+                ? TaskOrigin.of(TaskOrigin.Kind.LLM_TOOL, "death_resume_follow")
+                : intent.origin();
+        TaskManager.INSTANCE.assign(bot, new FollowTask(intent.targetName()), origin);
+        BotLog.lifecycle(bot, "follow_resumed_after_death",
+                "target", intent.targetName().isBlank() ? "owner" : intent.targetName(),
+                "origin", origin.kind());
+    }
+
     /** Explicit despawn is deletion: publish cancellation first, then forget every cached projection.
      * {@code IntentController.cancelAll} above already cancels active/paused work (reaching
      * {@code TaskManager.cancelIntentTasks} via {@code cancelActiveAndPausedWork}), so cleanup here uses
      * {@code TaskManager.forgetDespawnedBot}, not {@code onBotDespawn}: the latter's own
      * {@code cancelIntentTasks} call would bump {@code userPauseEpoch} a second time for one despawn. */
     public void deleteBot(AIPlayerEntity bot) {
+        FOLLOW_AFTER_DEATH.remove(bot.getUUID());
+        OWNER_DEATH_WATCH.remove(bot.getUUID());
         IntentController.INSTANCE.cancelAll(bot, IntentController.ControlOrigin.SYSTEM, "bot_despawn");
         BrainCoordinator.INSTANCE.reset(bot);
         IdleCoordinator.INSTANCE.onBotRemoved(bot);
@@ -133,6 +214,8 @@ public final class RuntimeLifecycleCoordinator {
 
     /** Server stop is unload, not deletion; the already-captured Mission must not receive CANCELLED. */
     public void unloadBot(AIPlayerEntity bot) {
+        FOLLOW_AFTER_DEATH.remove(bot.getUUID());
+        OWNER_DEATH_WATCH.remove(bot.getUUID());
         BrainCoordinator.INSTANCE.invalidateDecision(bot, "server_unload");
         BrainCoordinator.INSTANCE.reset(bot);
         GoalExecutor.INSTANCE.unload(bot);
@@ -175,6 +258,8 @@ public final class RuntimeLifecycleCoordinator {
     }
 
     private static void clearWorldRuntime() {
+        FOLLOW_AFTER_DEATH.clear();
+        OWNER_DEATH_WATCH.clear();
         NavEngineSelector.hook("baritone_clearAll", () -> BaritoneRegistry.INSTANCE.clearAll());
         GoalExecutor.INSTANCE.clearAllRuntime();
         TaskManager.INSTANCE.clearAllRuntime();

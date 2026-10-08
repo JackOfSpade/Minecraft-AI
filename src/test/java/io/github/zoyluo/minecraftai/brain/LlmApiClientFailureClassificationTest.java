@@ -37,12 +37,13 @@ final class LlmApiClientFailureClassificationTest {
     private HttpServer server;
     private final AtomicInteger requests = new AtomicInteger();
     private final List<Canned> script = new CopyOnWriteArrayList<>();
+    private final List<String> requestBodies = new CopyOnWriteArrayList<>();
 
     @BeforeEach
     void startServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
-            exchange.getRequestBody().readAllBytes();
+            requestBodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             int index = Math.min(requests.getAndIncrement(), script.size() - 1);
             Canned canned = script.get(index);
             if (canned.retryAfter() != null) {
@@ -72,6 +73,29 @@ final class LlmApiClientFailureClassificationTest {
         assertEquals(Duration.ofSeconds(7), failure.retryAfter());
         assertTrue(failure.getMessage().contains("status=503"), failure.getMessage());
         assertEquals(1, requests.get(), "one call is exactly one HTTP request");
+    }
+
+    @Test
+    void geminiOverloadFallsThroughTheModelChainForInitialAndContinuationRequests() throws Exception {
+        // The live native Interactions route must do what the OpenAI-compatible route already did:
+        // try a compatible Gemini sibling before asking LlmRetryRunner to replay the whole turn.
+        script.add(new Canned(503, null, "{}"));
+        script.add(new Canned(200, null, INTERACTION));
+        script.add(new Canned(503, null, "{}"));
+        script.add(new Canned(200, null, INTERACTION));
+        GeminiInteractionsApiClient client = gemini("gemini-3.5-flash-lite");
+
+        assertEquals("interaction-1", client.begin("prompt", List.of()).interactionId());
+        assertEquals("interaction-1", client.continueInteraction("previous-interaction",
+                List.of(new GeminiInteractionsApiClient.FunctionResult("call-1", "say", "ok")), List.of()).interactionId());
+
+        assertEquals(4, requests.get());
+        assertTrue(requestBodies.get(0).contains("\"model\":\"gemini-3.5-flash-lite\""));
+        assertTrue(requestBodies.get(1).contains("\"model\":\"gemini-3.1-flash-lite\""));
+        assertTrue(requestBodies.get(2).contains("\"model\":\"gemini-3.5-flash-lite\""));
+        assertTrue(requestBodies.get(3).contains("\"model\":\"gemini-3.1-flash-lite\""));
+        assertTrue(requestBodies.get(2).contains("\"previous_interaction_id\":\"previous-interaction\""));
+        assertTrue(requestBodies.get(3).contains("\"previous_interaction_id\":\"previous-interaction\""));
     }
 
     @Test
@@ -263,12 +287,20 @@ final class LlmApiClientFailureClassificationTest {
     }
 
     private GeminiInteractionsApiClient gemini() {
+        return gemini("model");
+    }
+
+    private GeminiInteractionsApiClient gemini(String model) {
         return new GeminiInteractionsApiClient(config(
-                "http://127.0.0.1:" + server.getAddress().getPort() + "/generativelanguage.googleapis.com/v1beta", 0));
+                "http://127.0.0.1:" + server.getAddress().getPort() + "/generativelanguage.googleapis.com/v1beta", 0, model));
     }
 
     private static MinecraftAiConfig.Llm config(String baseUrl, int retryCount) {
+        return config(baseUrl, retryCount, "model");
+    }
+
+    private static MinecraftAiConfig.Llm config(String baseUrl, int retryCount, String model) {
         // retryBackoffMs 1: the plain client's own retries must not slow the suite down.
-        return new MinecraftAiConfig.Llm("key", baseUrl, "model", 100, 0.3D, 5, retryCount, 1, Boolean.FALSE, "low");
+        return new MinecraftAiConfig.Llm("key", baseUrl, model, 100, 0.3D, 5, retryCount, 1, Boolean.FALSE, "low");
     }
 }

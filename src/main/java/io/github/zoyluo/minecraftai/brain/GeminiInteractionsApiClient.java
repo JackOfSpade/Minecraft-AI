@@ -17,6 +17,7 @@ import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 
@@ -142,25 +143,58 @@ public final class GeminiInteractionsApiClient {
                                         JsonObject body,
                                         int toolCount,
                                         int functionResultCount) throws GeminiInteractionsApiException {
-        // A call is exactly one HTTP request. Retrying a transient failure is the caller's job
-        // (LlmRetryRunner replays this same request outside the per-instruction model-call budget);
-        // retrying or falling back to another model here would hide attempts from that accounting.
-        String model = config.model();
-        body.addProperty("model", model);
-        BotLog.api(null, "gemini_interaction_request",
-                "kind", kind,
-                "model", model,
-                "tools_count", toolCount,
-                "function_results", functionResultCount,
-                "has_previous_interaction", previousInteractionId != null);
-        HttpResponse<String> response = sendOnce(requestFor(body));
-        if (response.statusCode() == 200) {
-            return parseResponse(response.body(), maxFunctionCallsPerResponse);
+        // The retry runner owns retries of a model that could not be contacted. A service-side
+        // overload, however, is an opportunity to use the configured Gemini fallback chain
+        // immediately. Keep the same stored-interaction id and tool-result batch: the
+        // Interactions API explicitly permits a model choice on every continuation.
+        GeminiInteractionsApiException lastFailure = null;
+        List<String> models = modelsForRequest();
+        for (int index = 0; index < models.size(); index++) {
+            String model = models.get(index);
+            JsonObject requestBody = body.deepCopy();
+            requestBody.addProperty("model", model);
+            BotLog.api(null, "gemini_interaction_request",
+                    "kind", kind,
+                    "model", model,
+                    "tools_count", toolCount,
+                    "function_results", functionResultCount,
+                    "has_previous_interaction", previousInteractionId != null);
+            HttpResponse<String> response = sendOnce(requestFor(requestBody));
+            if (response.statusCode() == 200) {
+                return parseResponse(response.body(), maxFunctionCallsPerResponse);
+            }
+            int status = response.statusCode();
+            lastFailure = new GeminiInteractionsApiException(classifyStatus(status, response.body()),
+                    LlmHttpStatus.kind(status, response.body()), status,
+                    LlmHttpStatus.retryAfter(response, response.body()), null);
+            if (!shouldTryNextModel(status, models, index)) {
+                throw lastFailure;
+            }
+            BotLog.warn(LogCategory.API, null, "gemini_interaction_model_fallback",
+                    "kind", kind,
+                    "from_model", model,
+                    "to_model", models.get(index + 1),
+                    "status", status,
+                    "continuation", previousInteractionId != null);
         }
-        int status = response.statusCode();
-        throw new GeminiInteractionsApiException(classifyStatus(status, response.body()),
-                LlmHttpStatus.kind(status, response.body()), status,
-                LlmHttpStatus.retryAfter(response, response.body()), null);
+        throw lastFailure == null
+                ? new GeminiInteractionsApiException("no_models_configured")
+                : lastFailure;
+    }
+
+    private List<String> modelsForRequest() {
+        LinkedHashSet<String> models = new LinkedHashSet<>();
+        models.add(config.model());
+        if ("gemini-3.5-flash-lite".equals(config.model())) {
+            models.add("gemini-3.1-flash-lite");
+            models.add("gemini-3.5-flash");
+        }
+        return List.copyOf(models);
+    }
+
+    private static boolean shouldTryNextModel(int status, List<String> models, int index) {
+        return index + 1 < models.size()
+                && (status == 404 || status == 429 || (status >= 500 && status < 600));
     }
 
     private JsonObject baseBody() {

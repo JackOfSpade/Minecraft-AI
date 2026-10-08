@@ -13,6 +13,7 @@ import baritone.api.pathing.goals.GoalXZ;
 import baritone.api.pathing.movement.IMovement;
 import baritone.api.pathing.path.IPathExecutor;
 import baritone.api.utils.PathCalculationResult;
+import baritone.pathing.movement.movements.MovementFall;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -396,16 +397,30 @@ public final class BaritoneNavigator {
                 : observedPathSafetyFailure(route, path, firstMovement);
     }
 
-    /** Pure path proof: it reads only Baritone's already-built movement list and route permissions. */
+    /**
+     * Pure path proof: it reads only Baritone's already-built movement list and route permissions.
+     *
+     * <p>Owner follow is deliberately stricter than ordinary navigation. A companion can wait
+     * for its owner to move or choose another observed hop, but it must never initiate
+     * Baritone's multi-block {@link MovementFall} while trying to catch up. The vanilla client
+     * can survive a one-block {@code MovementDescend}; {@code MovementFall}, including its
+     * water-bucket variant, is a committed drop whose landing may change before the owner-follow
+     * route is refreshed. Refusing it here protects both the inline admission path and every
+     * later worker replan before the input bridge can press movement keys.</p>
+     */
     static String observedPathSafetyFailure(NavRoute route, IPath path, int firstMovement) {
         if (route == null) {
             return null;
         }
         if (!route.options().allowWater() && path != null) {
             int safeFall = Math.max(1, MinecraftAiConfig.get().nav().maxSafeFall());
+            boolean ownerFollow = route.shape() == NavRoute.Shape.OWNER_FOLLOW;
             List<IMovement> movements = path.movements();
             for (int index = Math.max(0, firstMovement); index < movements.size(); index++) {
                 IMovement movement = movements.get(index);
+                if (ownerFollow && movement instanceof MovementFall) {
+                    return "navigation_owner_follow_fall_refused";
+                }
                 if (movement != null && movement.getSrc().getY() - movement.getDest().getY() > safeFall) {
                     return "navigation_unsafe_fall";
                 }

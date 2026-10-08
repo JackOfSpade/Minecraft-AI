@@ -105,9 +105,9 @@ final class SettingData {
                         "No per-bot proxy: search and acceptance radius (blocks, 3D, no dimension check) for forced, "
                                 + "revenge, faction and auto targets; also sizes the per-tick entity query when "
                                 + "auto-target is on. A forced order beyond it is ignored. This addon manages it: config "
-                                + "pvpbotSettings.maxTargetDistance (shipped 16 = the aggro controller's engage limit, allowed "
-                                + "4..128) is written into the settings whenever PvP BOT loads them. 16 is all it has to cover: "
-                                + "the addon never engages a target it sees beyond 16 blocks, and line of sight decides when a chase ends."),
+                                + "pvpbotSettings.maxTargetDistance (shipped 16 = the aggro controller's new-target and close-combat "
+                                + "limit, allowed 4..128) is written into the settings whenever PvP BOT loads them. The addon never starts "
+                                + "a target it sees beyond 16 blocks, but an already-acquired target is chased by line of sight beyond it."),
                 decimal("meleeRange", "melee-range", 2.0, 6.0, 3.5).global(
                         "No per-bot proxy: global melee reach. Older versions of this addon varied the bot's "
                                 + "entity_interaction_range per bot; an inhabitant now has the attributes of a vanilla player "

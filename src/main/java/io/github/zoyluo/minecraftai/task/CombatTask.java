@@ -54,12 +54,12 @@ public final class CombatTask extends AbstractTask {
     private static final double CREEPER_HEAL_SAFE_DISTANCE = 8.0D;
     private static final int RETREAT_STEP_DISTANCE = 6;
     private static final int LOST_SIGHT_LIMIT = 50; // Target blocked by a wall (no line of sight) for 2.5s straight -> end combat instead of foolishly fighting until timeout
-    /** A shot the line of fire forbids (a friend on it, no clear sight) holds the drawn or loaded weapon this long before falling back to melee. */
+    /** A blocked enemy line holds the drawn or loaded weapon this long before falling back to melee. */
     private static final int BLOCKED_SHOT_HOLD_LIMIT = 60;
     /** After a shot stayed blocked this long, the ranged weapon stays out of the plan this many ticks. */
     private static final int RANGED_SUPPRESS_TICKS = 200;
-    /** Peek cycles in a row whose shot a friend on the line of fire (or the lack of a clear line) held back, before the ranged weapon is given up. */
-    private static final int FRIENDLY_PEEK_LIMIT = 3;
+    /** Peek cycles in a row whose shot has no clear enemy line, before the ranged weapon is given up. */
+    private static final int BLOCKED_PEEK_LIMIT = 3;
     /** "there are other ranged enemies" -- at least one besides whichever one is currently targeted. */
     private static final int PEEKABOO_MIN_RANGED_THREATS = 2;
     private static final double PEEKABOO_SCAN_RANGE = 24.0D;
@@ -92,8 +92,6 @@ public final class CombatTask extends AbstractTask {
     private BlockPos retreatDestination;
     private int lostSightTicks; // Consecutive tick count with no line of sight to the target (blocked by a wall)
     private int blockedShotTicks;
-    /** Consecutive peeks that ended with a friend on the line of fire (the drawn bow was kept, not shot). */
-    private int friendlyBlockedPeeks;
     /** Consecutive peeks that ended with no clear line to the target ("no_line_of_sight": the drawn weapon was kept, not shot). */
     private int sightBlockedPeeks;
     /** Consecutive strikes whose crosshair held the target's (non-hostile or unreachable) mount instead of the target. */
@@ -188,7 +186,6 @@ public final class CombatTask extends AbstractTask {
         rangedSuppressedUntil = 0;
         peekThreatsAtLastPeek = 0;
         blockedShotTicks = 0;
-        friendlyBlockedPeeks = 0;
         sightBlockedPeeks = 0;
         mountBlockedTicks = 0;
     }
@@ -475,8 +472,10 @@ public final class CombatTask extends AbstractTask {
         }
         String refusal = StrikeLegality.shotRefusal(bot, target, RangedWeapon.shapeOf(bot.getMainHandItem()));
         if (refusal != null) {
-            // Never shoot into the owner or another bot, nor without a clear line: hold the drawn (or loaded) weapon until
-            // the line clears, then give up on ranged if it does not. approach() would re-enter RANGED at once
+            // A collider on the enemy line is still unsafe: hold the drawn (or loaded) weapon until
+            // the line clears, then give up on ranged if it does not. Allied humans/companions are
+            // ignored by projectile collision and therefore never reach this refusal.
+            // approach() would re-enter RANGED at once
             // through shouldUseRanged(), so the give-up latches ranged out of the plan for a while
             // and the fight really continues in melee.
             if (++blockedShotTicks > BLOCKED_SHOT_HOLD_LIMIT) {
@@ -501,7 +500,6 @@ public final class CombatTask extends AbstractTask {
      */
     private void giveUpRangedForBlockedShot(AIPlayerEntity bot, String reason) {
         blockedShotTicks = 0;
-        friendlyBlockedPeeks = 0;
         sightBlockedPeeks = 0;
         rangedSuppressedUntil = elapsed + RANGED_SUPPRESS_TICKS;
         BotLog.action(bot, "ranged_suppressed", "reason", reason,
@@ -922,7 +920,7 @@ public final class CombatTask extends AbstractTask {
     /**
      * True when {@code target} is beyond the melee boundary but within arrow range, observed with a
      * clear line of sight, and the bot holds a bow or a crossbow that can fire (real arrows, or a loaded
-     * crossbow), and no friend stands on the line of fire (of that weapon's shot): a shot from where the
+     * crossbow): a shot from where the
      * bot already stands, with no approach needed. Never for a never-melee threat (a creeper or enderman
      * is evaded, not provoked).
      */
@@ -941,8 +939,7 @@ public final class CombatTask extends AbstractTask {
         if (weaponSlot.isEmpty()) {
             return false;
         }
-        RangedWeapon.Shape shape = RangedWeapon.shapeOf(bot.getInventory().getNonEquipmentItems().get(weaponSlot.getAsInt()));
-        return !StrikeLegality.friendlyOnLineOfFire(bot, target, shape.spreadDeg(), shape.piercing());
+        return true;
     }
 
     private boolean shouldUseRanged(AIPlayerEntity bot) {
@@ -1233,22 +1230,14 @@ public final class CombatTask extends AbstractTask {
             // bot's own column hides them again as soon as it ducks back.
             peekThreatsAtLastPeek = CombatCore.rangedThreatsAround(bot, PEEKABOO_SCAN_RANGE).size();
             String refusal = StrikeLegality.shotRefusal(bot, target, RangedWeapon.shapeOf(bot.getMainHandItem()));
-            if ("friendly_on_line_of_fire".equals(refusal)) {
-                // With a friend on the line of fire the drawn (or loaded) weapon is kept, never shot into them; past a
-                // few such peeks it is given up, through the same path ranged() uses.
-                if (++friendlyBlockedPeeks > FRIENDLY_PEEK_LIMIT) {
-                    giveUpRangedForBlockedShot(bot, refusal);
-                    return;
-                }
-            } else if ("no_line_of_sight".equals(refusal)) {
-                // No clear line from the exposed cell either: counted like a friend on the line, or expose, refuse and hide would
+            if ("no_line_of_sight".equals(refusal)) {
+                // No clear line from the exposed cell either: without a valid enemy line, expose, refuse and hide would
                 // repeat for ever. Past the same limit the ranged weapon is given up and the fight goes on in melee.
-                if (++sightBlockedPeeks > FRIENDLY_PEEK_LIMIT) {
+                if (++sightBlockedPeeks > BLOCKED_PEEK_LIMIT) {
                     giveUpRangedForBlockedShot(bot, refusal);
                     return;
                 }
             } else if (refusal == null) {
-                friendlyBlockedPeeks = 0;
                 sightBlockedPeeks = 0;
                 if (aimed && RangedWeapon.shoot(bot)) {
                     BotLog.action(bot, "peekaboo_shot_released", "target_type", target.getType());

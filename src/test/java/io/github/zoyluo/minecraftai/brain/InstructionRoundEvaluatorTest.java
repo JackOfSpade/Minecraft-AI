@@ -27,7 +27,16 @@ final class InstructionRoundEvaluatorTest {
                                    int failed,
                                    boolean planBlocked) {
         return new ToolRound(startedBefore, planSpoken, failureReportCall, workActive, workStartSucceeded,
-                answerOnly, controlOnly, failed, planBlocked);
+                false, answerOnly, controlOnly, failed, planBlocked);
+    }
+
+    private static ToolRound continuousRound(boolean startedBefore,
+                                             boolean planSpoken,
+                                             boolean workActive,
+                                             boolean workStartSucceeded,
+                                             int failed) {
+        return new ToolRound(startedBefore, planSpoken, false, workActive, workStartSucceeded,
+                true, false, false, failed, false);
     }
 
     private static ToolRound planOnlyRound(boolean workActive) {
@@ -121,6 +130,20 @@ final class InstructionRoundEvaluatorTest {
         assertTrue(later.requestStarted());
         assertFalse(later.missingRequiredAction());
         assertFalse(later.keepGoing());
+    }
+
+    @Test
+    void aSucceededStandingOrderCompletesTheDecisionWithoutPollingForever() {
+        RoundOutcome outcome = InstructionRoundEvaluator.evaluateToolRound(
+                continuousRound(false, true, true, true, 0));
+
+        assertTrue(outcome.requestStarted());
+        assertFalse(outcome.missingRequiredAction());
+        assertFalse(outcome.keepGoing(), "follow/hold/guard are complete once their standing task is active");
+
+        RoundOutcome failed = InstructionRoundEvaluator.evaluateToolRound(
+                continuousRound(false, true, true, true, 1));
+        assertTrue(failed.keepGoing(), "a failed call still gets a repair turn even beside a standing order");
     }
 
     @Test

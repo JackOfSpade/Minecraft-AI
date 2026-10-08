@@ -111,6 +111,16 @@ final class CombatHardeningSourceContractTest {
         String watcher = read("task/DangerWatcher.java");
         assertTrue(watcher.contains("PvpBotCombatBrain.INSTANCE.tick(server, bot, aggressor)"),
                 "a factual vanilla aggro target must hand combat to the PvP BOT brain immediately");
+        int bridgeAttempt = watcher.indexOf("PvpBotCombatBrain.INSTANCE.tick(server, bot, aggressor)");
+        int bridgePreempt = watcher.indexOf("TaskManager.INSTANCE.pauseFor(bot, \"pvp_bot_combat\")");
+        int bridgeFallback = watcher.indexOf("pvpAggressors.remove(bot.getUUID());", bridgeAttempt);
+        assertTrue(bridgePreempt > bridgeAttempt && bridgeFallback > bridgePreempt,
+                "a task must be preempted only after PvP BOT accepts the target, before fallback runs");
+        int pvpBranchEnd = watcher.indexOf("        } else if (PvpBotCombatBrain.INSTANCE.isActive(bot))", bridgeAttempt);
+        assertFalse(watcher.substring(bridgeAttempt, pvpBranchEnd).contains("resumeFromPause"),
+                "a rejected PvP BOT handoff must not pause/resume a route each danger scan");
+        assertTrue(watcher.contains("task instanceof CombatTask || task instanceof EvadeTask"),
+                "an established deterministic safety owner must not be retried through the optional PvP bridge each scan");
         assertTrue(read("task/HostileBotLedger.java").contains("CombatCore.hasLineOfSight(bot, player)"),
                 "the foreign-PvP-bot combat handoff must require the companion's direct physical line of sight");
         assertFalse(watcher.contains("target_outside_leash"),
@@ -119,9 +129,11 @@ final class CombatHardeningSourceContractTest {
         assertTrue(combat.contains("if (refusal != null)"),
                 "the ranged loop must hold a ready weapon whenever the consolidated shot-legality check refuses it");
         assertTrue(combat.contains("StrikeLegality.shotRefusal(bot, target, RangedWeapon.shapeOf("),
-                "a ranged weapon must never be shot into the owner or another bot (or without a clear line)");
-        assertTrue(read("action/StrikeLegality.java").contains("\"friendly_on_line_of_fire\""),
-                "the shot refusal must name a friend on the line of fire");
+                "a ranged weapon must still verify a physical line to its target before it fires");
+        String legality = read("action/StrikeLegality.java");
+        String shotRefusal = legality.substring(legality.indexOf("public static String shotRefusal"));
+        assertFalse(shotRefusal.contains("friendlyOnLineOfFire") || shotRefusal.contains("friendly_on_line_of_fire"),
+                "allies are passed through by projectile collision, not treated as a blocked shot");
         assertTrue(combat.contains("CombatCore.safeStrafeInput("),
                 "the REPOSITION strafe needs a footing check");
         assertTrue(read("task/ShieldGuard.java").contains("\"shooter_draw\""));
@@ -130,6 +142,14 @@ final class CombatHardeningSourceContractTest {
         assertTrue(creeper.contains("SHIELD") && creeper.contains("shouldRaiseShield")
                         && creeper.contains("EquipAction.hasShield(bot)"),
                 "the creeper shield fallback must exist and only fire with a shield");
+    }
+
+    @Test
+    void pvpBridgeForcesTheAcceptedPlayerTargetSoTheWrapperCanAuthorizeTheStrike() throws IOException {
+        String bridge = read("task/PvpBotCombatBrain.java");
+        assertTrue(bridge.contains("current.setTarget.invoke(null, name, desiredTarget)"));
+        assertTrue(bridge.contains("current.forcedTargetName.get(state)"));
+        assertTrue(bridge.contains("Method setTarget = combat.getMethod(\"setTarget\", String.class, String.class)"));
     }
 
     @Test
@@ -153,7 +173,7 @@ final class CombatHardeningSourceContractTest {
                         || core.substring(stepBody, stepEnd).contains("setDeltaMovement"),
                 "a walked step must not move or re-velocity the bot itself");
         assertTrue(combat.contains("rangedSuppressedUntil"),
-                "a friend on the line of fire must latch ranged out of the plan, not loop into RANGED");
+                "a genuinely blocked enemy line must latch ranged out of the plan, not loop into RANGED");
         assertTrue(core.contains("enderman.getTarget() == bot")
                         && !core.contains("mob.getTarget() == bot ||"),
                 "Mob.getTarget() stays only the legacy Enderman rule");
@@ -208,9 +228,9 @@ final class CombatHardeningSourceContractTest {
                 "stopAll is an interruption: it must cancel a drawn bow, not fire it");
     }
     @Test
-    void coverPhasesCountFriendlyBlockedPeeksAndLeaveThroughTheRangedGiveUpPath() throws IOException {
+    void coverPhasesCountBlockedEnemyLinesAndLeaveThroughTheRangedGiveUpPath() throws IOException {
         String combat = read("task/CombatTask.java");
-        assertTrue(combat.contains("FRIENDLY_PEEK_LIMIT") && combat.contains("friendlyBlockedPeeks"));
+        assertTrue(combat.contains("BLOCKED_PEEK_LIMIT") && combat.contains("sightBlockedPeeks"));
         int give = combat.indexOf("private void giveUpRangedForBlockedShot(");
         assertTrue(give > 0 && combat.substring(give).contains("rangedSuppressedUntil = elapsed + RANGED_SUPPRESS_TICKS"));
         int ranged = combat.indexOf("private void ranged(");
@@ -218,7 +238,7 @@ final class CombatHardeningSourceContractTest {
                 "ranged() gives the weapon up through the shared path");
         int peek = combat.indexOf("private void coverPeek(");
         assertTrue(combat.substring(peek, combat.indexOf("private boolean shouldBlock(")).contains("giveUpRangedForBlockedShot(bot, refusal)"),
-                "a peek that a friend keeps blocking gives the weapon up through the same path");
+                "a peek whose enemy line stays blocked gives the weapon up through the same path");
         int hide = combat.indexOf("private void coverHide(");
         assertTrue(combat.substring(hide, combat.indexOf("private void coverPeek(")).contains("!shouldUseRanged(bot)"),
                 "cover-hide re-checks that ranged is still in the plan");
@@ -240,9 +260,11 @@ final class CombatHardeningSourceContractTest {
         assertTrue(ownerTest > 0 && botTest > ownerTest, "the owner is tested before the bot kind");
         assertTrue(body.contains("entity instanceof AIPlayerEntity") && body.contains("HostileBotLedger.isVisibleAggressor(bot, player)"),
                 "a Minecraft-AI bot is always friendly, a foreign bot only until it is a visible marked aggressor");
+        assertTrue(body.contains("if (!PlayerKind.isBot(player))"),
+                "real human players are allies of every Minecraft-AI companion");
         assertTrue(body.contains("isAnyBotOwner(player.getUUID())"), "a human that owns a bot is not a foreign bot");
         String strike = legality.substring(legality.indexOf("public static String strikeRefusal"),
-                legality.indexOf("public static boolean friendlyOnLineOfFire"));
+                legality.indexOf("public static String shotRefusal"));
         assertFalse(strike.contains("SharedVision") && strike.contains("ownerSees"),
                 "the owner's sight must never permit a strike: strikeRefusal stays on the bot's own reach and line of sight");
 

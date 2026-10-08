@@ -166,6 +166,11 @@ public final class FollowTask extends AbstractTask {
         this.targetName = FollowTargetResolver.normalize(targetName);
     }
 
+    /** The explicit target requested for this follow, or blank when following the bot's owner. */
+    public String requestedTargetName() {
+        return targetName;
+    }
+
     /** Package-visible for GameTests: bounded water-route searches run by the swim/exit logic. */
     int swimRouteSearchCount() {
         return swimming.routeSearchCount();
@@ -540,9 +545,14 @@ public final class FollowTask extends AbstractTask {
     }
 
     private void followSwimming(AIPlayerEntity bot, ServerPlayer target) {
-        // A swimmer still has a gap to close. The same FOLLOW lease makes a far swimmer sprint
-        // and lets a close/friendly player keep the bot at a walk or sneak pace.
+        // A swimmer still has a gap to close. Keep the normal follow decision for diagnostics and
+        // land/boat transitions, then request vanilla sprint-swimming while a real swim stroke
+        // owns movement. This is not a velocity boost: ActionPack still applies Minecraft's food,
+        // blindness, item-use, collision, and forward-input sprint rules before the physics tick.
+        // A WALK lease here made a healthy companion visibly trail a normally sprint-swimming
+        // player even while it was pressing forward continuously.
         publishPace(bot, target);
+        bot.getActionPack().requestPace(Gait.SPRINT, PaceOwner.FOLLOW);
         if (BoatSupport.mountedBoat(bot).isPresent()) {
             // The player is swimming, not boating.  Never keep driving or acquire a new boat in
             // this branch; vanilla places the passenger in the adjacent water on dismount.

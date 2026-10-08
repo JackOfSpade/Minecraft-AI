@@ -25,7 +25,10 @@
     "BaritoneItemStackMixin",
     "BaritoneLootTableMixin",
     "BaritoneLootContextBuilderMixin",
-    "BotMeleeKnockbackMixin"
+    "BotMeleeKnockbackMixin",
+    "CompanionProjectileCollisionMixin",
+    "CompanionArrowCollisionMixin",
+    "CompanionMeleePassThroughMixin"
   ],
   "client": [],
   "server": [],

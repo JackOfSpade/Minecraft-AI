@@ -24,10 +24,12 @@ import io.github.zoyluo.minecraftai.task.BotTickCoordinator;
 import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.CommonLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -95,9 +97,22 @@ public class MinecraftAiMod implements ModInitializer {
         });
         // Damage records (who hurt whom, in level game time) and the teleport counters are per server run.
         io.github.zoyluo.minecraftai.entity.RecentDamage.register();
+        // The player party and Minecraft-AI companions never hurt each other. Projectile collision
+        // mixins make arrows/tridents continue through those allies, while this gate also covers
+        // melee and any modded direct-damage path.
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register((victim, source, amount) ->
+                !io.github.zoyluo.minecraftai.entity.CompanionAllegiance.blocksDamage(victim, source));
         // Pace: hostiles after the bot, its owner, the followed player or a Minecraft-AI bot keep it at a sprint (see AggroSense).
         io.github.zoyluo.minecraftai.action.PacePolicy.setDefaultPressureProbe(bot -> io.github.zoyluo.minecraftai.task.AggroSense.snapshot(bot).pressure());
         io.github.zoyluo.minecraftai.task.HostileBotLedger.install();
+        // Register after the hostile-bot ledger: its death handler first marks the killer, then
+        // every companion of this real player can keep fighting that proven threat before holding.
+        ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
+            if (entity instanceof ServerPlayer player
+                    && !(player instanceof io.github.zoyluo.minecraftai.entity.AIPlayerEntity)) {
+                RuntimeLifecycleCoordinator.INSTANCE.onOwnerDeath(player);
+            }
+        });
         // Realistic perception (docs/PERCEPTION.md): a blow on a bot makes its striker known to it.
         io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.install();
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {

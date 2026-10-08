@@ -45,17 +45,16 @@ final class CompanionPerceptionSourceContractTest {
     }
 
     @Test
-    void aCoverPeekWithoutALineIsCountedAndGivenUpLikeAFriendOnTheLine() throws IOException {
+    void aCoverPeekWithoutAnEnemyLineIsCountedAndGivenUp() throws IOException {
         String combat = read("task/CombatTask.java");
         int peek = combat.indexOf("private void coverPeek(AIPlayerEntity bot)");
         String body = combat.substring(peek, combat.indexOf("private boolean shouldBlock(AIPlayerEntity bot)"));
-        int friendly = body.indexOf("\"friendly_on_line_of_fire\".equals(refusal)");
         int sight = body.indexOf("\"no_line_of_sight\".equals(refusal)");
         int clear = body.indexOf("refusal == null");
-        assertTrue(friendly >= 0 && sight > friendly && clear > sight, "no_line_of_sight is a refusal of its own between the two");
-        assertTrue(body.contains("++sightBlockedPeeks > FRIENDLY_PEEK_LIMIT")
+        assertTrue(sight >= 0 && clear > sight, "no_line_of_sight remains the sole blocked-shot refusal");
+        assertTrue(body.contains("++sightBlockedPeeks > BLOCKED_PEEK_LIMIT")
                         && body.substring(sight, clear).contains("giveUpRangedForBlockedShot(bot, refusal)"),
-                "past the same limit as a friend on the line, ranged is given up");
+                "after a sustained blocked enemy line, ranged is given up");
         assertTrue(body.substring(clear).contains("sightBlockedPeeks = 0"), "a clear shot resets the count");
         assertEquals(3, count(combat, "sightBlockedPeeks = 0;"),
                 "the counter is reset by a clear shot, by the give-up path and by the task reset");

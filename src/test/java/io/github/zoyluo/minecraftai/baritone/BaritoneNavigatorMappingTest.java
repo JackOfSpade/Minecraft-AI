@@ -422,9 +422,11 @@ final class BaritoneNavigatorMappingTest {
                         && click.contains("pillar_destination_outside_column"),
                 "the placement interceptor must reject bridge/side placements outside an explicit pillar column");
         String safety = method(navigator, "static String observedPathSafetyFailure(");
-        assertTrue(safety.contains("movement.getSrc().getY() - movement.getDest().getY() > safeFall")
+        assertTrue(safety.contains("ownerFollow && movement instanceof MovementFall")
+                        && safety.contains("navigation_owner_follow_fall_refused")
+                        && safety.contains("movement.getSrc().getY() - movement.getDest().getY() > safeFall")
                         && safety.contains("navigation_observed_corridor_unavailable"),
-                "dry movement lists must obey maxSafeFall and no-place completion before execution");
+                "owner follow must refuse Baritone fall movements, while other dry routes still obey maxSafeFall and no-place completion before execution");
         String observedHostiles = method(navigator, "private static int observedHostileCount(");
         assertTrue(observedHostiles.contains("baritone.getPlayerContext().entities()")
                         && observedHostiles.contains("entity instanceof Mob mob && mob instanceof Enemy && mob.isAlive()")

@@ -48,6 +48,8 @@ public final class EmergencyShelterTask extends AbstractTask {
     /** Three refused or failed, non-cancelled attempts at one doorway mean its live pose is no longer trustworthy. */
     private static final int EGRESS_MOTION_FAILURE_LIMIT = 3;
     private static final int DAYLIGHT_GRACE_TICKS = 100;
+    /** Five seconds between player-visible recovery reports: enough to stay informed without filling chat. */
+    static final int RECOVERY_STATUS_INTERVAL_TICKS = 100;
     /**
      * A non-surface shelter's HOLD phase must wait out a real minimum window before treating the
      * bot as recovered enough to leave -- otherwise a bot that spawns already at full health/food
@@ -176,6 +178,10 @@ public final class EmergencyShelterTask extends AbstractTask {
     private boolean waitingForRescue;
     private boolean criedForHelp;
     private boolean rescueResolvedAnnounced;
+    /** Task elapsed tick of the last ordinary recovery update, or -1 before the first. */
+    private int lastRecoveryStatusElapsed = -1;
+    /** The full-recovery exit announcement belongs to this one shelter episode. */
+    private boolean recoveryReadyAnnounced;
     private final LivingEntity initiatingThreat;
     private final BlockPos rememberedThreatPos;
     private BlockPos retreatGoal;
@@ -270,6 +276,8 @@ public final class EmergencyShelterTask extends AbstractTask {
         waitingForRescue = false;
         criedForHelp = false;
         rescueResolvedAnnounced = false;
+        lastRecoveryStatusElapsed = -1;
+        recoveryReadyAnnounced = false;
         retreatGoal = null;
         cleanupDebtRegistered = false;
         elevatedForRoofSupport = false;
@@ -586,6 +594,7 @@ public final class EmergencyShelterTask extends AbstractTask {
             phaseStartedElapsed = elapsed;
             bot.getActionPack().stopAll();
             BotLog.action(bot, "shelter_hold_started", "placed", placed);
+            announceRecoveryStatusIfDue(bot);
             return;
         }
         if (elapsed - lastProgressTick > NO_PROGRESS_LIMIT) {
@@ -964,6 +973,12 @@ public final class EmergencyShelterTask extends AbstractTask {
             beginForcedPressureExit(bot);
             return;
         }
+        // HOLD may be waiting out a daylight/minimum-safety window while vanilla regeneration
+        // runs. Keep the player informed throughout that whole recovery, not only when food runs
+        // out and a rescue is required.
+        if (!isRecoveredEnoughToExit(bot)) {
+            announceRecoveryStatusIfDue(bot);
+        }
         if (surfaceShelter) {
             if (!bot.level().isBrightOutside()) {
                 consecutiveDaylightTicks = 0;
@@ -998,6 +1013,38 @@ public final class EmergencyShelterTask extends AbstractTask {
             return;
         }
         beginRecoveredExit(bot);
+    }
+
+    /** A bounded, player-visible progress report for an ordinary sealed-shelter recovery. */
+    private void announceRecoveryStatusIfDue(AIPlayerEntity bot) {
+        if (!isRecoveryStatusDue(elapsed, lastRecoveryStatusElapsed)) {
+            return;
+        }
+        lastRecoveryStatusElapsed = elapsed;
+        boolean waitingForFood = waitingForRescue || isHealingStalledWithoutFood(
+                bot.getHealth(), bot.getMaxHealth(), InventoryAction.hasFood(bot), canRegenerateNaturally(bot));
+        String message = recoveryStatusMessage(bot.getHealth(), bot.getMaxHealth(),
+                bot.getFoodData().getFoodLevel(), waitingForFood);
+        BrainCoordinator.INSTANCE.sendBotReply(bot, message);
+        BotLog.action(bot, "shelter_recovery_status",
+                "health", bot.getHealth(), "max_health", bot.getMaxHealth(),
+                "food", bot.getFoodData().getFoodLevel(), "waiting_for_food", waitingForFood);
+    }
+
+    static boolean isRecoveryStatusDue(int elapsed, int lastStatusElapsed) {
+        return lastStatusElapsed < 0 || elapsed - lastStatusElapsed >= RECOVERY_STATUS_INTERVAL_TICKS;
+    }
+
+    static String recoveryStatusMessage(float health, float maxHealth, int foodLevel, boolean waitingForFood) {
+        String status = "Shelter status: " + (int) Math.ceil(Math.max(0.0F, health)) + "/"
+                + (int) Math.ceil(Math.max(0.0F, maxHealth)) + " HP, hunger " + foodLevel + "/20.";
+        if (waitingForFood) {
+            return status + " I need food before I can keep healing.";
+        }
+        if (health >= maxHealth) {
+            return status + " Fully healed; I am waiting for a safe moment to leave and resume defense.";
+        }
+        return status + " Still healing before I resume defense.";
     }
 
     /**
@@ -2469,7 +2516,20 @@ public final class EmergencyShelterTask extends AbstractTask {
      * owner after it steps out; resealing forever would turn recovery into a dirt prison.
      */
     private void beginRecoveredExit(AIPlayerEntity bot) {
+        announceRecoveryReady(bot);
         beginSafeExit(bot, "shelter_recovery_complete", "shelter_recovery_complete_exit");
+    }
+
+    private void announceRecoveryReady(AIPlayerEntity bot) {
+        if (recoveryReadyAnnounced) {
+            return;
+        }
+        recoveryReadyAnnounced = true;
+        BrainCoordinator.INSTANCE.sendBotReply(bot,
+                "Fully healed and ready. Opening my shelter now; I will resume defense once I am outside.");
+        BotLog.action(bot, "shelter_recovery_ready",
+                "health", bot.getHealth(), "max_health", bot.getMaxHealth(),
+                "food", bot.getFoodData().getFoodLevel());
     }
 
     /**

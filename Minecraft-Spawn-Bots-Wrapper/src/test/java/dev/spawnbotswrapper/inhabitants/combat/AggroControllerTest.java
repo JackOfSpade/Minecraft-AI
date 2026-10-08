@@ -219,18 +219,20 @@ class AggroControllerTest {
     }
 
     @Test
-    void aTargetSightedBeyondTheEngageLimitIsTooFarAndTheBotGoesHome() {
+    void anEstablishedChaseContinuesPastTheEngageLimitWhileTheTargetStaysInSight() {
         steve.x = 15;
         assertTrue(ticksUntilChase(80) > 0);
         bot.x = 3; // it moved on while chasing: home is where it began
         steve.x = 70; // still in plain sight, now sighted at 67 blocks
         s.run(1);
-        assertEquals(Phase.RETURN, s.phase(), "sighted beyond 16: too far, back home");
-        assertEquals(1L, s.controller.stats().giveUps().get("too far"));
+        assertEquals(Phase.CHASE, s.phase(), "the 16-block rule gates acquisition, not a visible chase");
         assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"));
-        assertTrue(s.log.debug.stream().anyMatch(l -> l.contains("too far")), s.log.debug.toString());
-        s.run(100);
-        assertEquals(1, sets(), "it does not engage the far player again");
+        assertFalse(s.up.callsOf("steer").isEmpty(), "the wrapper keeps walking toward the visible target");
+        assertNull(s.controller.stats().giveUps().get("too far"), "distance alone never ends an acquired chase");
+        steve.x = 15;
+        s.run(1);
+        assertEquals(Phase.CHASE, s.phase());
+        assertEquals(2, sets(), "the same confirmed chase re-arms PvP BOT when the target returns to combat range");
     }
 
     @Test
@@ -637,6 +639,24 @@ class AggroControllerTest {
         s.hit(steve);
         s.run(5); // 14 ticks after the first hit tick
         assertEquals(1, sets(), "confirmed 13 ticks after the FIRST hit");
+    }
+
+    @Test
+    void aDifferentLatestAttackerReplacesAnAlreadyConfirmedChase() {
+        steve.x = 8;
+        assertTrue(ticksUntilChase(40) > 0);
+        assertEquals("Steve", s.controller.confirmedTarget("Warden7"));
+
+        Person alex = s.world.add("Alex", 4);
+        s.hit(alex);
+        s.run(1);
+
+        assertEquals(Phase.CHASE, s.phase());
+        assertEquals("Alex", s.controller.engagedWith("Warden7"));
+        assertNull(s.controller.confirmedTarget("Warden7"), "the old forced target must be cleared before retaliation");
+        assertTrue(s.up.callsOf("clear").size() >= 1);
+        s.run(13);
+        assertEquals("Alex", s.controller.confirmedTarget("Warden7"));
     }
 
     @Test

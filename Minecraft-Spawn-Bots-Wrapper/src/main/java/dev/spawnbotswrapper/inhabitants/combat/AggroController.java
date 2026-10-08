@@ -24,15 +24,16 @@ import java.util.function.Supplier;
 /**
  * The "line of sight hunter" of the hostile inhabitants: what they do about players (and their companions), decided by
  * what they can SEE and HEAR. The one hard-coded distance rule is the ENGAGE LIMIT ({@link #ENGAGE_LIMIT}, 16 blocks):
- * sight has no block limit in the view cone, but a bot never engages a target it sees (and measures) farther away.
+ * sight has no block limit in the view cone, and the limit applies only when starting a new engagement. Once acquired,
+ * a target is pursued for as long as it stays visible.
  * <pre>
  *   IDLE --(noticed)--&gt; CHASE --(lost)--&gt; PURSUE --(arrived or blocked)--&gt; SEARCH --(10 s)--&gt; RETURN --(home)--&gt; IDLE
  *   PURSUE / SEARCH / RETURN --(noticed again)--&gt; CHASE          IDLE / PURSUE / SEARCH / RETURN --(hit)--&gt; CHASE (confirming) or PURSUE
  * </pre>
  * <b>No magic.</b> The bot acts only on what it perceives: sight (the current position while the target is visible), the last
  * known position and last seen velocity, hearing (vanilla vibrations: the position of a sound), and the direction a blow came
- * from. It never reads the true position, distance, health or life of a target it cannot see: "too far" is decided only from
- * a SIGHTING measured beyond the engage limit; a target that logs out, changes level or dies OUT OF SIGHT is simply lost
+ * from. It never reads the true position, distance, health or life of a target it cannot see: a target that logs out,
+ * changes level or dies OUT OF SIGHT is simply lost
  * (last known position, search, walk home); only a death or disappearance the bot SEES ends the engagement at once.
  * <p>
  * <b>Noticing</b> is {@link Perception}: a player that stays in view for the reaction time (a continuous formula in seconds:
@@ -45,8 +46,9 @@ import java.util.function.Supplier;
  * reaction time. Only while confirmed does PvP BOT hold the target (so it can neither shoot nor strike earlier; a melee
  * hit or crossbow shot outside a confirmed engagement is vetoed, see {@link #mayAttackPlayer}). The FIRST unseen tick clears
  * PvP BOT's target and the bot steers to the last known position; EVERY re-sighting restarts the exposure from zero (no
- * instant resume). Unseen for {@code loseGraceTicks} the target is LOST. Seen beyond the engage limit: too far, the bot gives
- * up and goes home.
+ * instant resume). Unseen for {@code loseGraceTicks} the target is LOST. A visible target that has moved beyond the
+ * engage limit is still chased by the wrapper's line-of-sight navigation; PvP BOT's own forced target is held only while
+ * it is back inside that combat radius.
  * <p>
  * <b>PURSUE.</b> PvP BOT's target is cleared (so it does not track through walls) and the bot walks to the last known
  * position along a planned route ({@link PathPlanner}); if the player was moving it continues a few blocks along the last
@@ -79,9 +81,9 @@ import java.util.function.Supplier;
 public final class AggroController {
 
     /**
-     * The ENGAGE LIMIT, the only hard-coded distance rule: a target the bot sees and measures farther than this many blocks
-     * is never engaged (not acquired, not chased, no pursuit or search for it). Sight itself has no such limit. Not a
-     * tunable.
+     * The ENGAGE LIMIT, the only hard-coded acquisition rule: a target the bot sees and measures farther than this many
+     * blocks is never newly acquired. An already-confirmed target continues to be chased while visible. Sight itself has
+     * no such limit. Not a tunable.
      */
     public static final double ENGAGE_LIMIT = Perception.ENGAGE_LIMIT;
 
@@ -453,6 +455,16 @@ public final class AggroController {
             st.pos = bot.position();
         }
         if (st != null && st.phase == Phase.CHASE) {
+            // A live chase used to return before draining this tick's hit. That left the bot
+            // permanently focused on its original target while a different player kept damaging
+            // it. The latest distinct attacker always gets the normal pain-led handoff (including
+            // reaction-time and visibility safeguards) before the old chase continues.
+            if (hit != null && active() && isDifferentAttacker(st, hit)) {
+                st = onHit(now, world, bot, st, hit, false, cfg);
+                if (st != null && (st.phase == Phase.CHASE || st.phase == Phase.PURSUE)) {
+                    return;
+                }
+            }
             chase(now, world, bot, st, cfg);
             return;
         }
@@ -498,6 +510,12 @@ public final class AggroController {
 
     private BotState state(String name) {
         return states.computeIfAbsent(name, k -> new BotState());
+    }
+
+    /** A repeated strike by the current target does not restart its already-confirmed chase. */
+    private static boolean isDifferentAttacker(BotState chase, AggroWorld.Hit hit) {
+        Body attacker = hit.attacker();
+        return attacker == null || !Objects.equals(attacker.handle(), chase.entity);
     }
 
     private Origin here(Watcher bot) {
@@ -984,7 +1002,8 @@ public final class AggroController {
      * One tick of an engagement with a player. Everything here is a function of what the bot SEES this tick (occlusion clear)
      * and what it saw before:
      * <ul>
-     *   <li>seen beyond the engage limit: too far, the bot gives up and goes home (never engaged);</li>
+     *   <li>seen beyond the engage limit after an engagement began: PvP BOT's close-combat target is released and the
+     *       wrapper keeps walking toward the visible target; it is re-armed once the target comes back within range;</li>
      *   <li>seen: the last known position and velocity are updated; a re-sighting starts the exposure from zero; the
      *       engagement is CONFIRMED (PvP BOT is handed the target) only once the exposure reaches the reaction time;</li>
      *   <li>the FIRST unseen tick: not confirmed any more, PvP BOT's target cleared; the bot steers to the last known
@@ -1021,13 +1040,6 @@ public final class AggroController {
         }
         if (visible) {
             double distance = bot.distanceTo(target);
-            if (distance > ENGAGE_LIMIT) {
-                // Sighted and measured beyond the limit: too far to engage.
-                giveUps.merge("too far", 1L, Long::sum);
-                up.clearTarget(name);
-                beginReturn(now, bot, st, "too far: sighted " + fmt(distance) + " blocks away, the limit is " + fmt(ENGAGE_LIMIT));
-                return;
-            }
             if (st.unseen > 0) {
                 // Every re-sighting restarts the reaction: no instant resume behind a tree, a corner or a pillar.
                 st.unseen = 0;
@@ -1044,8 +1056,22 @@ public final class AggroController {
             st.lastZ = p.z();
             st.haveLast = true;
             if (st.confirmed) {
+                if (distance > ENGAGE_LIMIT) {
+                    // The 16-block limit is only for taking on a new opponent. PvP BOT uses the
+                    // same setting for its own forced-target combat, so release that short-range
+                    // target while the wrapper keeps a factual, line-of-sight chase going.
+                    if (st.forcedByUs != null) {
+                        up.clearTarget(name);
+                        st.forcedByUs = null;
+                    }
+                    steerToward(bot, p);
+                    return;
+                }
                 if (held == null && now > st.confirmedAt + 1) {
-                    beginPursue(now, bot, st, "PvP BOT dropped the target");
+                    // We deliberately release the upstream target while the chase is beyond its
+                    // combat radius. Once sight brings the opponent back, re-arm the same already
+                    // confirmed engagement without manufacturing a new acquisition or reaction delay.
+                    confirm(now, bot, st, target, st.reaction);
                 }
                 return;
             }

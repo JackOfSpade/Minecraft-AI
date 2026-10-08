@@ -110,6 +110,22 @@ final class EmergencyShelterRecoverySourceContractTest {
     }
 
     @Test
+    void sealedRecoveryReportsProgressAndAnnouncesWhenItCanResumeDefense() throws IOException {
+        String shelter = read("task/EmergencyShelterTask.java");
+
+        assertTrue(shelter.contains("RECOVERY_STATUS_INTERVAL_TICKS = 100"),
+                "recovery updates need a bounded cadence rather than a per-tick chat flood");
+        assertTrue(shelter.contains("announceRecoveryStatusIfDue(bot);"),
+                "a sealed shelter must report recovery progress from its HOLD phase");
+        assertTrue(shelter.contains("BrainCoordinator.INSTANCE.sendBotReply(bot, message)"),
+                "ordinary recovery reports must reach Minecraft chat as well as the optional panel");
+        assertTrue(shelter.contains("announceRecoveryReady(bot);"),
+                "the recovery-complete transition must tell the player before opening the exit");
+        assertTrue(shelter.contains("Fully healed and ready. Opening my shelter now;"),
+                "the readiness message should explain both exit and the return to defense");
+    }
+
+    @Test
     void everyTerminalPathDoesNotLeaveAnUnroofedButSideSealedBotWithoutAnExitOrSafeCleanup() throws IOException {
         String shelter = read("task/EmergencyShelterTask.java");
         int preserve = shelter.indexOf("private boolean preserveOwnedExitDebt(AIPlayerEntity bot)");

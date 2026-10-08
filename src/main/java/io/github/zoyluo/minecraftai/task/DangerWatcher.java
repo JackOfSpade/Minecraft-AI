@@ -11,6 +11,7 @@ import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -511,17 +512,26 @@ public final class DangerWatcher {
             PvpBotCombatBrain.INSTANCE.release(bot);
             pvpAggressors.remove(bot.getUUID());
         } else if (aggroTarget.filter(target -> !CombatCore.isMeleeForbiddenThreat(target)).isPresent()
-                && PvpBotCombatBrain.INSTANCE.available()) {
+                && PvpBotCombatBrain.INSTANCE.available()
+                // A deterministic safety fallback has already taken ownership after a prior bridge
+                // refusal. Do not let a failed optional handoff repeatedly cancel its route (and
+                // restart weapon selection) every danger scan. An already-active bridge is still
+                // ticked so it can continue or relinquish control normally.
+                && (PvpBotCombatBrain.INSTANCE.isActive(bot)
+                || active.filter(task -> task instanceof CombatTask || task instanceof EvadeTask).isEmpty())) {
             LivingEntity aggressor = aggroTarget.orElseThrow();
             boolean wasPvpCombatActive = PvpBotCombatBrain.INSTANCE.isActive(bot);
-            if (active.isPresent()) {
-                if (active.get() instanceof CombatTask) {
-                    TaskManager.INSTANCE.abort(bot);
-                } else {
-                    TaskManager.INSTANCE.pauseFor(bot, "pvp_bot_combat");
-                }
-            }
             if (PvpBotCombatBrain.INSTANCE.tick(server, bot, aggressor)) {
+                // PvP BOT has accepted the target and is now the action owner. Only now may its
+                // movement/weapon decisions preempt the current task. Doing this before tick()
+                // created the live pause/resume loop when the bridge declined the handoff.
+                if (active.isPresent()) {
+                    if (active.get() instanceof CombatTask) {
+                        TaskManager.INSTANCE.abort(bot);
+                    } else {
+                        TaskManager.INSTANCE.pauseFor(bot, "pvp_bot_combat");
+                    }
+                }
                 pvpAggressors.put(bot.getUUID(), aggressor);
                 if (!wasPvpCombatActive) {
                     BotLog.danger(bot, "pvp_bot_combat_active",
@@ -530,13 +540,12 @@ public final class DangerWatcher {
                 }
                 return true;
             }
-            // The optional bridge failed after a task was preserved. Restore it now so the
-            // existing deterministic safety fallback can still make a decision this scan.
+            // The optional bridge refused the handoff. Keep the current task untouched so the
+            // deterministic fallback below can either preserve its current safety owner or
+            // preempt ordinary work exactly once. A task paused by an earlier successful bridge
+            // intentionally stays paused: assigning fallback safety work preserves that mission
+            // frame rather than briefly resuming it into a live threat.
             pvpAggressors.remove(bot.getUUID());
-            if (active.isPresent() && !(active.get() instanceof CombatTask)) {
-                TaskManager.INSTANCE.resumeFromPause(bot);
-                active = TaskManager.INSTANCE.getActive(bot);
-            }
         } else if (PvpBotCombatBrain.INSTANCE.isActive(bot)) {
             PvpBotCombatBrain.INSTANCE.release(bot);
             pvpAggressors.remove(bot.getUUID());
@@ -581,6 +590,18 @@ public final class DangerWatcher {
                         "decision", task.name());
                 return true;
             }
+        }
+        // The owner has died. Combat and the physical survival branches above retain priority,
+        // but once no live danger owns this companion it must stay put rather than resuming the
+        // old follow/mission, starting maintenance work, or wandering through idle behavior.
+        if (RuntimeLifecycleCoordinator.INSTANCE.awaitingOwnerReturn(bot)) {
+            if (active.isEmpty()) {
+                TaskManager.INSTANCE.assign(bot, new HoldTask(),
+                        TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "owner_death_wait"));
+                BotLog.lifecycle(bot, "companion_waiting_for_owner_after_death",
+                        "pos", bot.blockPosition().toShortString());
+            }
+            return true;
         }
         // Mitigation hardening (life-saving fallback): trapped in a dark underground spot -> retreat to the surface, taking priority over resupply/eating.
         if (maybeEscapeDarkTrap(server, bot, active)) {

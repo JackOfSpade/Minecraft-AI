@@ -9,6 +9,7 @@ import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.observe.BotProfiler;
 import io.github.zoyluo.minecraftai.observe.TpsGuard;
 import io.github.zoyluo.minecraftai.runtime.ExecutionStack;
+import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.server.MinecraftServer;
 
@@ -51,6 +52,9 @@ public final class TaskManager {
                         boolean publishStatus) {
         if (isUserPaused(bot) && !origin.safety()) {
             throw new IllegalStateException("mission_user_paused");
+        }
+        if (isNewOwnerDirection(origin)) {
+            RuntimeLifecycleCoordinator.INSTANCE.clearOwnerDeathWatch(bot, "new_owner_direction");
         }
         abort(bot, publishStatus);
         bot.getActionPack().stopAll();
@@ -170,7 +174,21 @@ public final class TaskManager {
      * was cancelled.
      */
     public boolean cancelIntentTasksKeepingActiveSafety(AIPlayerEntity bot, String reason) {
-        return cancelIntentTasks(bot, reason, true);
+        return cancelIntentTasks(bot, reason, isActiveSafety(bot));
+    }
+
+    /**
+     * Owner death is a battlefield transition: keep a live fight, evade or guard owner as well
+     * as ordinary safety work, but clear any follow/mission waiting beneath it so it cannot later
+     * resume toward the dead player.
+     */
+    public boolean cancelIntentTasksKeepingActiveCombatOrSafety(AIPlayerEntity bot, String reason) {
+        Task current = active.get(bot.getUUID());
+        boolean keepActive = isActiveSafety(bot)
+                || current instanceof CombatTask
+                || current instanceof EvadeTask
+                || current instanceof GuardTask;
+        return cancelIntentTasks(bot, reason, keepActive);
     }
 
     /** True when the active task exists and was assigned with SAFETY authority. */
@@ -180,10 +198,9 @@ public final class TaskManager {
         return active.containsKey(uuid) && origin != null && origin.safety();
     }
 
-    private boolean cancelIntentTasks(AIPlayerEntity bot, String reason, boolean keepActiveSafety) {
+    private boolean cancelIntentTasks(AIPlayerEntity bot, String reason, boolean keepActive) {
         UUID uuid = bot.getUUID();
         bumpUserPauseEpoch(uuid);
-        boolean keepActive = keepActiveSafety && isActiveSafety(bot);
         Task current = keepActive ? null : active.remove(uuid);
         if (!keepActive) {
             activeOrigins.remove(uuid);
@@ -254,6 +271,41 @@ public final class TaskManager {
         }
         ExecutionStack<Task> stack = executionStacks.get(bot.getUUID());
         return stack != null && stack.anyMatch(taskType::isInstance);
+    }
+
+    /**
+     * Captures a live or safety-paused follow instruction before a lifecycle interruption clears
+     * the task stack. The active task wins; otherwise the newest paused follow is the one the
+     * player was most recently asking the companion to perform.
+     */
+    public Optional<FollowIntent> activeOrPausedFollowIntent(AIPlayerEntity bot) {
+        if (bot == null) {
+            return Optional.empty();
+        }
+        UUID uuid = bot.getUUID();
+        Task current = active.get(uuid);
+        if (current instanceof FollowTask follow) {
+            return Optional.of(new FollowIntent(follow.requestedTargetName(), activeOrigins.get(uuid)));
+        }
+        ExecutionStack<Task> stack = executionStacks.get(uuid);
+        return stack == null ? Optional.empty()
+                : stack.newestMatch(FollowTask.class::isInstance)
+                .map(frame -> new FollowIntent(((FollowTask) frame.work()).requestedTargetName(), frame.origin()));
+    }
+
+    /** A resumable player follow intent captured across a companion death. */
+    public record FollowIntent(String targetName, TaskOrigin origin) {
+    }
+
+    /** Player-directed work intentionally releases the local hold installed when that player died. */
+    private static boolean isNewOwnerDirection(TaskOrigin origin) {
+        if (origin == null) {
+            return false;
+        }
+        return switch (origin.kind()) {
+            case PLAYER_COMMAND, PLAYER_PANEL, LLM_TOOL, MISSION, JOB -> true;
+            case SAFETY, SYSTEM_BACKGROUND, VERIFY -> false;
+        };
     }
 
     public int pausedDepth(AIPlayerEntity bot) {

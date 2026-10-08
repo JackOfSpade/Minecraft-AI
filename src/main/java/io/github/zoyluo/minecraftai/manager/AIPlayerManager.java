@@ -91,7 +91,7 @@ public final class AIPlayerManager {
         String respawnStrategy;
         if (anchor != null && anchor.isAlive() && !(anchor instanceof AIPlayerEntity)) {
             respawnWorld = anchor.level();
-            respawnPos = safeSpawnPosition(respawnWorld, anchor.position(), bot.getGameProfile().name());
+            respawnPos = safeCompanionSpawnPosition(respawnWorld, anchor, bot.getGameProfile().name());
             respawnStrategy = ownerOf(bot).filter(owner -> owner.equals(anchor.getUUID())).isPresent()
                     ? "owner_nearby" : "online_player_nearby";
         } else {
@@ -128,10 +128,61 @@ public final class AIPlayerManager {
             bot.completeMinecraftAiDeathRespawn();
         }
         bot.clearFire();
+        RuntimeLifecycleCoordinator.INSTANCE.onBotRespawned(bot);
         BotLog.danger(bot, "bot_respawned_after_death",
                 "pos", LogFields.pos(bot.blockPosition()),
                 "strategy", respawnStrategy);
         return true;
+    }
+
+    /**
+     * One-shot owner recovery for companions that a death transition or another mod left out of
+     * reach. This is deliberately scoped to the caller's own live companions; it is not a
+     * general coordinate teleport command.
+     */
+    public int recallOwnedCompanions(ServerPlayer owner) {
+        if (owner == null || !owner.isAlive()) {
+            return 0;
+        }
+        int recalled = 0;
+        for (AIPlayerEntity bot : botsOf(owner.getUUID())) {
+            if (recallOwnedCompanion(owner, bot)) {
+                recalled++;
+            }
+        }
+        return recalled;
+    }
+
+    /** One-shot recovery for one named companion, restricted to that companion's owner. */
+    public boolean recallOwnedCompanion(ServerPlayer owner, String companionName) {
+        if (owner == null || !owner.isAlive() || companionName == null || companionName.isBlank()) {
+            return false;
+        }
+        return getByName(companionName)
+                .filter(bot -> owner.getUUID().equals(botOwners.get(bot.getUUID())))
+                .map(bot -> recallOwnedCompanion(owner, bot))
+                .orElse(false);
+    }
+
+    private boolean recallOwnedCompanion(ServerPlayer owner, AIPlayerEntity bot) {
+        // Recall is an explicit owner direction, so it also releases the post-owner-death local
+        // hold. A revived follower can therefore continue its preserved direct-follow intent.
+        RuntimeLifecycleCoordinator.INSTANCE.clearOwnerDeathWatch(bot, "owner_recall");
+        if (needsRecoveryRespawn(bot)) {
+            return respawnDeadBot(bot, owner);
+        }
+        ServerLevel world = owner.level();
+        Vec3 destination = safeCompanionSpawnPosition(world, owner, bot.getGameProfile().name());
+        bot.getActionPack().stopAll();
+        boolean moved = bot.teleportTo(world, destination.x, destination.y, destination.z,
+                Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+        if (moved) {
+            BotLog.lifecycle(bot, "companion_recalled_by_owner",
+                    "owner", owner.getGameProfile().name(),
+                    "pos", LogFields.pos(bot.blockPosition()),
+                    "placement", "owner_adjacent");
+        }
+        return moved;
     }
 
     /**
@@ -259,12 +310,26 @@ public final class AIPlayerManager {
             BotMemoryStore.INSTANCE.loadString(bot.getUUID(), record.memoryNbt());
             bot.setHealth(Math.max(1.0F, Math.min(record.health(), bot.getMaxHealth())));
             bot.getFoodData().setFoodLevel(Math.max(0, Math.min(20, record.hunger())));
+            BotPersistence.restoreTower(bot, record);
+
+            // Spawn through the normal persisted-position path first so other mods see and can
+            // handle their expected restore location.  Only after the complete restore do we
+            // move an online owner's companion beside them.
+            String restoreStrategy = target.strategy();
+            Optional<ServerPlayer> owner = onlineOwner(server, record);
+            if (owner.isPresent()) {
+                ServerPlayer anchor = owner.get();
+                Vec3 anchorPos = safeCompanionSpawnPosition(anchor.level(), anchor, bot.getGameProfile().name());
+                bot.teleportTo(anchor.level(), anchorPos.x, anchorPos.y, anchorPos.z,
+                        Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+                restoreStrategy += "_then_owner_nearby";
+            }
             BotLog.lifecycle(bot, "bot_restored",
                     "pos", LogFields.pos(bot.blockPosition()),
                     "mode", gameMode.getSerializedName(),
                     "dimension", bot.level().dimension().identifier(),
+                    "restore_strategy", restoreStrategy,
                     "fallback", target.fallback());
-            BotPersistence.restoreTower(bot, record);
         });
         return spawned;
     }
@@ -489,12 +554,24 @@ public final class AIPlayerManager {
                     "name", record.name(), "dimension", record.dimension());
             return overworldSpawn(server);
         }
-        return new RestoreTarget(world, new Vec3(record.x(), record.y(), record.z()), false);
+        return new RestoreTarget(world, new Vec3(record.x(), record.y(), record.z()), false, "saved_position");
+    }
+
+    private static Optional<ServerPlayer> onlineOwner(MinecraftServer server, BotRecord record) {
+        UUID ownerUuid = parseUuid(record.ownerUuid());
+        if (ownerUuid == null) {
+            return Optional.empty();
+        }
+        ServerPlayer owner = server.getPlayerList().getPlayer(ownerUuid);
+        return owner != null && owner.isAlive() && !(owner instanceof AIPlayerEntity)
+                ? Optional.of(owner)
+                : Optional.empty();
     }
 
     private static RestoreTarget overworldSpawn(MinecraftServer server) {
         ServerLevel overworld = server.overworld();
-        return new RestoreTarget(overworld, Vec3.atBottomCenterOf(overworld.getRespawnData().pos()), true);
+        return new RestoreTarget(overworld, Vec3.atBottomCenterOf(overworld.getRespawnData().pos()), true,
+                "world_spawn_fallback");
     }
 
     private static Vec3 safeSpawnPosition(ServerLevel world, Vec3 requested, String name) {
@@ -516,10 +593,40 @@ public final class AIPlayerManager {
         return Vec3.atBottomCenterOf(safe.get());
     }
 
+    /**
+     * A companion recall/revive must be visible beside its owner, not hidden inside the same
+     * player-sized space. Prefer a nearby standable cell before falling back to the general safe
+     * spawn resolver for cramped terrain.
+     */
+    private static Vec3 safeCompanionSpawnPosition(ServerLevel world, ServerPlayer owner, String name) {
+        BlockPos origin = owner.blockPosition();
+        int[][] offsets = {
+                {2, 0}, {-2, 0}, {0, 2}, {0, -2},
+                {2, 2}, {2, -2}, {-2, 2}, {-2, -2},
+                {1, 0}, {-1, 0}, {0, 1}, {0, -1}
+        };
+        Standability.clearCache();
+        for (int[] offset : offsets) {
+            BlockPos candidate = origin.offset(offset[0], 0, offset[1]);
+            if (Standability.isStandable(world, candidate)) {
+                return Vec3.atBottomCenterOf(candidate);
+            }
+        }
+        return safeSpawnPosition(world, owner.position(), name);
+    }
+
+    /** A recall is recovery authority: treat both the normal dead state and a mod-removed corpse as reviveable. */
+    private static boolean needsRecoveryRespawn(AIPlayerEntity bot) {
+        return bot.getHealth() <= 0.0F
+                || !bot.isAlive()
+                || bot.isRemoved()
+                || bot.getRemovalReason() == net.minecraft.world.entity.Entity.RemovalReason.KILLED;
+    }
+
     private static String normalizeName(String name) {
         return name.toLowerCase(Locale.ROOT);
     }
 
-    private record RestoreTarget(ServerLevel world, Vec3 pos, boolean fallback) {
+    private record RestoreTarget(ServerLevel world, Vec3 pos, boolean fallback, String strategy) {
     }
 }

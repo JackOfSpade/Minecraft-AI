@@ -1641,12 +1641,32 @@ final class FollowSwimming {
         if (withinStepCorridor(feet, admission.origin(), admission.destination())) {
             return true;
         }
+        if (kind == WalkedStep.Kind.SWIM
+                && admission.origin().getY() == admission.destination().getY()
+                && withinStepSwimSettlingEnvelope(feet, admission.origin(), admission.destination())) {
+            return true;
+        }
         BlockPos origin = admission.origin();
         return isNormalizableDryWalk(kind)
                 && activeStepTicks >= 0 && activeStepTicks <= 1
                 && feet.getX() == origin.getX()
                 && feet.getZ() == origin.getZ()
                 && Math.abs(feet.getY() - origin.getY()) == 1;
+    }
+
+    /**
+     * Vanilla swimming naturally bobs a body around the waterline during a horizontal stroke.
+     * Keep the already-admitted stroke alive for that one-cell vertical settle, but never widen
+     * its X/Z corridor, enter another horizontal cell, or carry a vertical swim step past its
+     * observed destination. The destination and complete refusal envelope are still re-proved by
+     * {@link #canContinueObservedStep(AIPlayerEntity, WalkedStep, StepAdmission)} every tick.
+     */
+    private static boolean withinStepSwimSettlingEnvelope(BlockPos feet, BlockPos origin,
+                                                           BlockPos destination) {
+        return between(feet.getX(), origin.getX(), destination.getX())
+                && between(feet.getZ(), origin.getZ(), destination.getZ())
+                && feet.getY() >= Math.min(origin.getY(), destination.getY()) - 1
+                && feet.getY() <= Math.max(origin.getY(), destination.getY()) + 1;
     }
 
     private static boolean withinStepCorridor(BlockPos feet, BlockPos origin, BlockPos destination) {

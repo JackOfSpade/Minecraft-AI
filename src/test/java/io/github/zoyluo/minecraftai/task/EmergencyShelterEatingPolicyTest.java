@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.task;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EmergencyShelterEatingPolicyTest {
@@ -85,5 +86,18 @@ class EmergencyShelterEatingPolicyTest {
         assertTrue(EmergencyShelterTask.shouldAbandonRescueWaitAndFight(10.0F, 20.0F));
         assertTrue(EmergencyShelterTask.shouldAbandonRescueWaitAndFight(15.0F, 20.0F));
         assertFalse(EmergencyShelterTask.shouldAbandonRescueWaitAndFight(9.99F, 20.0F));
+    }
+
+    @Test
+    void recoveryStatusStartsImmediatelyThenStaysAtAReadableCadence() {
+        assertTrue(EmergencyShelterTask.isRecoveryStatusDue(60, -1));
+        assertFalse(EmergencyShelterTask.isRecoveryStatusDue(159, 60));
+        assertTrue(EmergencyShelterTask.isRecoveryStatusDue(160, 60));
+        assertEquals("Shelter status: 8/20 HP, hunger 20/20. Still healing before I resume defense.",
+                EmergencyShelterTask.recoveryStatusMessage(7.5F, 20.0F, 20, false));
+        assertEquals("Shelter status: 8/20 HP, hunger 17/20. I need food before I can keep healing.",
+                EmergencyShelterTask.recoveryStatusMessage(7.5F, 20.0F, 17, true));
+        assertEquals("Shelter status: 20/20 HP, hunger 20/20. Fully healed; I am waiting for a safe moment to leave and resume defense.",
+                EmergencyShelterTask.recoveryStatusMessage(20.0F, 20.0F, 20, false));
     }
 }

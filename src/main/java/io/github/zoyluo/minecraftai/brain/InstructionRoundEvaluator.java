@@ -24,6 +24,8 @@ final class InstructionRoundEvaluator {
                      boolean workActive,
                      /* a work-start tool of THIS round succeeded */
                      boolean workStartToolSucceeded,
+                     /* a successfully-started standing order (follow/hold/guard) remains active until replaced */
+                     boolean continuousWorkStarted,
                      boolean answerOnly,
                      boolean controlOnly,
                      int failedToolCalls,
@@ -55,10 +57,15 @@ final class InstructionRoundEvaluator {
         boolean plannedWithoutActing = round.planSpoken() && !started;
         boolean withhold = shouldWithholdSay(missing, round.planBlockedAction(), started, plannedWithoutActing);
         // Unrelated running work must not keep the loop (and its apology) alive after a valid answer.
+        // A standing order has already completed the player's request by becoming active; it
+        // must not keep an LLM continuation open just because its task correctly never ends.
+        // Finite work still gets the ordinary completion/failure continuation, and a failed
+        // tool call always gets a repair round even if the same response also started a standing
+        // order.
         boolean keepGoing = missing
                 || round.planBlockedAction()
                 || round.failedToolCalls() > 0
-                || (round.workActive() && started);
+                || (round.workActive() && started && !round.continuousWorkStarted());
         return new RoundOutcome(started, missing, missing || round.planBlockedAction(), withhold, keepGoing);
     }
 

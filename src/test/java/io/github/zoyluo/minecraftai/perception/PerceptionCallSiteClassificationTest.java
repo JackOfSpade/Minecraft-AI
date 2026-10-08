@@ -63,6 +63,7 @@ class PerceptionCallSiteClassificationTest {
         m.put("task/EmergencyShelterTask.java", Counts.of(2, 1, 2));           // physical: melee strike from the shelter
         m.put("task/EvadeTask.java", Counts.of(3, 1, 1));                      // object: the OWNER's direction (a friend), plain sight; physical: the source must still press on the bot
         m.put("task/FollowEscort.java", Counts.of(1, 0, 0));
+        m.put("task/HostileBotLedger.java", Counts.of(0, 0, 1));             // a marked foreign bot gets the immediate defensive handoff only across a physical line
         m.put("perception/PerceptionCollector.java", Counts.of(1, 1, 0));      // what the LLM is told it sees: creatures noticed; dropped items observed
         m.put("log/DiagnosticLogger.java", Counts.of(1, 0, 0));
         m.put("brain/AmbientConversationCoordinator.java", Counts.of(1, 0, 0)); // ambient chat: a canned line needs an addressee the speaker has noticed

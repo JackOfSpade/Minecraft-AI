@@ -361,6 +361,11 @@ public class AIPlayerEntity extends ServerPlayer {
      */
     @Override
     public boolean hurtServer(ServerLevel world, DamageSource source, float amount) {
+        // Fabric's shared damage gate protects real players too; retain this direct guard on the
+        // fake-player subtype so a third-party mod calling hurtServer itself cannot hurt a companion.
+        if (CompanionAllegiance.blocksDamage(this, source)) {
+            return false;
+        }
         float before = this.getHealth();
         boolean applied = super.hurtServer(world, source, amount);
         try {

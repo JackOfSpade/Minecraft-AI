@@ -6,6 +6,7 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.goal.GoalExecutor;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.observe.TpsGuard;
+import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
 import net.minecraft.server.MinecraftServer;
 
 public final class BotTickCoordinator {
@@ -25,7 +26,11 @@ public final class BotTickCoordinator {
             if (DangerWatcher.INSTANCE.tickDeathRespawn(server, bot)) {
                 continue;
             }
-            boolean runDanger = tick % guard.dangerScanInterval(bot.getUUID()) == 0;
+            // An owner death cancels ordinary work. Give the local fight-then-hold stance the
+            // next tick immediately, rather than letting a mission executor refill that slot
+            // while the adaptive danger cadence is between scans.
+            boolean awaitingOwnerReturn = RuntimeLifecycleCoordinator.INSTANCE.awaitingOwnerReturn(bot);
+            boolean runDanger = awaitingOwnerReturn || tick % guard.dangerScanInterval(bot.getUUID()) == 0;
             boolean runBackground = tick % guard.scanInterval(bot.getUUID()) == 0;
             // Realistic perception (docs/PERCEPTION.md): what this bot has noticed, read once per tick before anything asks. It never
             // consumes the tick and never throws.

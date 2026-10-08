@@ -371,6 +371,8 @@ final class FollowSwimSourceContractTest {
         String followEnvelope = body(swim, "private static boolean withinStepContinuationEnvelope",
                 "private static boolean withinStepCorridor");
         assertTrue(followEnvelope.contains("withinStepCorridor(feet, admission.origin(), admission.destination())")
+                        && followEnvelope.contains("kind == WalkedStep.Kind.SWIM")
+                        && followEnvelope.contains("withinStepSwimSettlingEnvelope")
                         && followEnvelope.contains("isNormalizableDryWalk(kind)")
                         && followEnvelope.contains("activeStepTicks >= 0 && activeStepTicks <= 1")
                         && followEnvelope.contains("feet.getX() == origin.getX()")

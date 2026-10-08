@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.runtime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
@@ -53,6 +54,21 @@ public final class ExecutionStack<T> {
             return false;
         }
         return frames.stream().anyMatch(frame -> predicate.test(frame.work()));
+    }
+
+    /** The newest paused frame matching {@code predicate}, without changing stack order. */
+    public Optional<Frame<T>> newestMatch(Predicate<? super T> predicate) {
+        if (predicate == null) {
+            return Optional.empty();
+        }
+        Iterator<Frame<T>> framesFromTop = frames.descendingIterator();
+        while (framesFromTop.hasNext()) {
+            Frame<T> frame = framesFromTop.next();
+            if (predicate.test(frame.work())) {
+                return Optional.of(frame);
+            }
+        }
+        return Optional.empty();
     }
 
     public record Frame<T>(UUID frameId, T work, TaskOrigin origin) {

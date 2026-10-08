@@ -143,7 +143,8 @@ public final class OpenAiCompatibleApiClient {
     }
 
     private static boolean shouldTryNextModel(int status, List<String> models, int index) {
-        return index + 1 < models.size() && (status == 429 || status == 404);
+        return index + 1 < models.size()
+                && (status == 404 || status == 429 || (status >= 500 && status < 600));
     }
 
     private HttpResponse<String> sendWithRetry(HttpRequest request) throws LlmApiException {

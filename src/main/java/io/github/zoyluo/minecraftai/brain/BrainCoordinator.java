@@ -68,6 +68,8 @@ public final class BrainCoordinator {
             "mine_and_stockpile", "recover_drops", "assign_task", "continue_goal_step", "replan_goal_from_current_state",
             "launch_boat", "board_boat",
             "boat_follow", "exit_boat", "give_item");
+    /** Standing orders deliberately remain active until a player replaces them; they do not need planner polling. */
+    private static final Set<String> CONTINUOUS_WORK_TOOLS = Set.of("follow", "hold", "guard", "boat_follow");
     // These terminal/mission-control commands are intentionally not "start work" actions. They
     // must remain usable as concise commands without making a fictional plan first.
     private static final Set<String> CONTROL_ONLY_TOOLS = Set.of(
@@ -385,6 +387,12 @@ public final class BrainCoordinator {
         // work-start tool of this instruction that succeeded moves the flag (it then stays set).
         boolean workStartToolSucceeded = dispatchBatch.executedCalls().stream()
                 .anyMatch(call -> call.ok() && isWorkStartTool(call.name()));
+        // A follow/hold/guard task is a completed instruction as soon as it is assigned.  The
+        // old generic "active task" continuation waited for it to finish, which is impossible
+        // for a standing order, then repeatedly invited Gemini to assign the same task until the
+        // call budget was exhausted.
+        boolean continuousWorkStarted = dispatchBatch.executedCalls().stream()
+                .anyMatch(call -> call.ok() && isContinuousWorkTool(call.name()));
         if (workStartToolSucceeded) {
             Set<String> succeededCalls = dispatchBatch.executedCalls().stream()
                     .filter(ActionDispatcher.ExecutedToolCall::ok)
@@ -410,6 +418,7 @@ public final class BrainCoordinator {
                         failureReportCall,
                         workActive,
                         workStartToolSucceeded,
+                        continuousWorkStarted,
                         isAnswerOnlyReply(toolCalls),
                         isControlOnlyReply(toolCalls),
                         failedToolCalls,
@@ -432,6 +441,7 @@ public final class BrainCoordinator {
                 "repeated_plan_faults", repeatedPlanFaults,
                 "say_withheld_next_call", conversation.withholdSayNextCall,
                 "work_active", workActive,
+                "continuous_work_started", continuousWorkStarted,
                 "request_started", conversation.requestStarted,
                 "failure_report_call", failureReportCall,
                 "provider", executor.usesGeminiInteractions() ? "gemini_interactions" : "chat_completions");
@@ -855,6 +865,10 @@ public final class BrainCoordinator {
 
     static boolean isWorkStartTool(String toolName) {
         return WORK_START_TOOLS.contains(toolName);
+    }
+
+    static boolean isContinuousWorkTool(String toolName) {
+        return CONTINUOUS_WORK_TOOLS.contains(toolName);
     }
 
     private static boolean isValidSayWithPurpose(ChatToolCall call, String expectedPurpose) {

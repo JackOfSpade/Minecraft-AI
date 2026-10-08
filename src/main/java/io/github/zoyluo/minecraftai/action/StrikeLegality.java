@@ -34,11 +34,6 @@ import net.minecraft.world.phys.Vec3;
  * {@link InteractAction#attackEntity} then aims at human speed and lands it only on what is under the crosshair.
  */
 public final class StrikeLegality {
-    /** Widening applied to a friendly player's box when testing a bow line of fire (arc and spread). */
-    private static final double LINE_OF_FIRE_MARGIN = 0.6D;
-    /** How far past its target a piercing arrow is assumed to fly, blocks. */
-    public static final double PIERCING_REACH = 24.0D;
-
     private StrikeLegality() {
     }
 
@@ -48,9 +43,7 @@ public final class StrikeLegality {
      * ({@link HostileBotLedger#isVisibleAggressor}).
      *
      * <p>Order: the bot itself, any Minecraft-AI bot (any owner), a non-player, the bot's own owner (before the bot test: a GameTest
-     * owner is a mock on an EmbeddedChannel), then a foreign bot (friendly unless a visible aggressor). Any other human, including the
-     * owner of another bot, is not friendly here, exactly as before: such a player becomes hostile only through
-     * {@code CombatCore.hasHurtBotOrOwner}.
+     * owner is a mock on an EmbeddedChannel), any real human player, then a foreign bot (friendly unless a visible aggressor).
      */
     public static boolean isFriendly(AIPlayerEntity bot, Entity entity) {
         if (entity == bot || entity instanceof AIPlayerEntity) {
@@ -61,6 +54,9 @@ public final class StrikeLegality {
         }
         Optional<java.util.UUID> owner = AIPlayerManager.INSTANCE.ownerOf(bot);
         if (owner.isPresent() && owner.get().equals(player.getUUID())) {
+            return true;
+        }
+        if (!PlayerKind.isBot(player)) {
             return true;
         }
         if (PlayerKind.isBot(player) && !AIPlayerManager.INSTANCE.isAnyBotOwner(player.getUUID())) {
@@ -106,66 +102,12 @@ public final class StrikeLegality {
         return null;
     }
 
-
     /**
-     * True when the owner or another bot stands close to the straight line from the bot's eyes to
-     * {@code target}'s centre, i.e. an arrow released now could hit a friend instead.
-     */
-    public static boolean friendlyOnLineOfFire(AIPlayerEntity bot, Entity target) {
-        return friendlyOnLineOfFire(bot, target, 0.0D, false);
-    }
-
-    /**
-     * {@link #friendlyOnLineOfFire(AIPlayerEntity, Entity)} for a shot with a shape: a Multishot volley also flies
-     * {@code spreadDeg} to either side of the aim, and a piercing arrow goes on through the target, so a friend standing behind
-     * it (up to {@link #PIERCING_REACH} blocks further) is hit too.
-     */
-    public static boolean friendlyOnLineOfFire(AIPlayerEntity bot, Entity target, double spreadDeg, boolean piercing) {
-        Vec3 eye = bot.getEyePosition();
-        Vec3 toAim = target.getBoundingBox().getCenter().subtract(eye);
-        double distance = toAim.length();
-        double[] yawOffsets = spreadDeg > 0.0D ? new double[]{0.0D, spreadDeg, -spreadDeg} : new double[]{0.0D};
-        for (double yawOffset : yawOffsets) {
-            Vec3 direction = toAim;
-            if (yawOffset != 0.0D) {
-                double radians = Math.toRadians(yawOffset);
-                direction = new Vec3(
-                        toAim.x * Math.cos(radians) - toAim.z * Math.sin(radians),
-                        toAim.y,
-                        toAim.x * Math.sin(radians) + toAim.z * Math.cos(radians));
-            }
-            Vec3 end = piercing && distance > 1.0E-6D
-                    ? eye.add(direction.scale((distance + PIERCING_REACH) / distance))
-                    : eye.add(direction);
-            if (friendOnSegment(bot, target, eye, end)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean friendOnSegment(AIPlayerEntity bot, Entity target, Vec3 eye, Vec3 end) {
-        for (ServerPlayer other : bot.level().players()) {
-            if (other == bot || !other.isAlive() || other == target || !isFriendly(bot, other)) {
-                continue;
-            }
-            AABB box = other.getBoundingBox().inflate(LINE_OF_FIRE_MARGIN);
-            if (box.clip(eye, end).isPresent() || box.contains(eye)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * The reason a shot at {@code target} is illegal right now, or {@code null} when it is legal: a friend (the owner or another
-     * bot) on the line of fire ({@code friendly_on_line_of_fire}, widened for a Multishot volley and a piercing arrow) or no
-     * collider line of sight to the target ({@code no_line_of_sight}).
+     * The reason a shot at {@code target} is illegal right now, or {@code null} when it is legal.
+     * Friendly humans/companions are deliberately not a refusal: their projectile collision hooks
+     * ignore this shot so it can continue to the observed target.
      */
     public static String shotRefusal(AIPlayerEntity bot, Entity target, RangedWeapon.Shape shape) {
-        if (friendlyOnLineOfFire(bot, target, shape.spreadDeg(), shape.piercing())) {
-            return "friendly_on_line_of_fire";
-        }
         if (!hasStrikeLineOfSight(bot, target)) {
             return "no_line_of_sight";
         }

@@ -79,6 +79,18 @@ final class PvpBotCombatBrain {
             }
             ShieldGuard.preparePvpBrainMeleeBlock(bot, aggressor);
             current.lastAttacker.set(state, aggressor);
+            if (aggressor instanceof ServerPlayer player) {
+                String desiredTarget = player.getGameProfile().name();
+                Object forced = current.forcedTargetName.get(state);
+                // PvP BOT's update can remember a revenge target without actually forcing it.
+                // The inhabitants wrapper correctly vetoes such unconfirmed player strikes, which
+                // otherwise leaves a companion circling an attacker without ever landing a hit.
+                // Force the factual aggressor once per target change so both systems agree on
+                // combat authority, then let the regular combat tick handle weapons and movement.
+                if (!(forced instanceof String forcedName) || !forcedName.equalsIgnoreCase(desiredTarget)) {
+                    current.setTarget.invoke(null, name, desiredTarget);
+                }
+            }
             if (current.lastAttackTime != null) {
                 // PvP BOT compares this field with System.currentTimeMillis(), not Minecraft
                 // server ticks. Supplying a tick count makes the forced revenge memory look
@@ -150,6 +162,7 @@ final class PvpBotCombatBrain {
                 Class<?> combat = Class.forName(COMBAT_CLASS);
                 Method getState = combat.getMethod("getState", String.class);
                 Method clearTarget = combat.getMethod("clearTarget", String.class);
+                Method setTarget = combat.getMethod("setTarget", String.class, String.class);
                 Method update = findUpdate(combat);
                 Class<?> stateType = getState.getReturnType();
                 Field lastAttacker = stateType.getField("lastAttacker");
@@ -157,7 +170,8 @@ final class PvpBotCombatBrain {
                     throw new IllegalStateException("BotCombat.CombatState.lastAttacker is not an Entity");
                 }
                 Field lastAttackTime = optionalLongField(stateType, "lastAttackTime");
-                Field target = optionalEntityField(stateType, "target");
+                Field target = requiredEntityField(stateType, "target");
+                Field forcedTargetName = requiredStringField(stateType, "forcedTargetName");
 
                 Method moveToward = null;
                 Method removeState = null;
@@ -168,8 +182,8 @@ final class PvpBotCombatBrain {
                 } catch (ClassNotFoundException ignored) {
                     // Combat still works; only the beyond-32 navigation hand-off is unavailable.
                 }
-                bridge = new Bridge(getState, clearTarget, update, lastAttacker, lastAttackTime,
-                        target, moveToward, removeState);
+                bridge = new Bridge(getState, clearTarget, setTarget, update, lastAttacker, lastAttackTime,
+                        target, forcedTargetName, moveToward, removeState);
             } catch (Throwable ignored) {
                 // PvP BOT is optional. The existing safety fallback remains authoritative when it
                 // is not installed or has changed its public bridge contract.
@@ -227,21 +241,30 @@ final class PvpBotCombatBrain {
         }
     }
 
-    private static Field optionalEntityField(Class<?> type, String name) {
-        try {
-            Field field = type.getField(name);
-            return Entity.class.isAssignableFrom(field.getType()) ? field : null;
-        } catch (ReflectiveOperationException ignored) {
-            return null;
+    private static Field requiredEntityField(Class<?> type, String name) throws NoSuchFieldException {
+        Field field = type.getField(name);
+        if (!Entity.class.isAssignableFrom(field.getType())) {
+            throw new IllegalStateException("BotCombat.CombatState." + name + " is not an Entity");
         }
+        return field;
+    }
+
+    private static Field requiredStringField(Class<?> type, String name) throws NoSuchFieldException {
+        Field field = type.getField(name);
+        if (field.getType() != String.class) {
+            throw new IllegalStateException("BotCombat.CombatState." + name + " is not a String");
+        }
+        return field;
     }
 
     private record Bridge(Method getState,
                           Method clearTarget,
+                          Method setTarget,
                           Method update,
                           Field lastAttacker,
                           Field lastAttackTime,
                           Field target,
+                          Field forcedTargetName,
                           Method moveTowardPosition,
                           Method removeNavigationState) {
     }

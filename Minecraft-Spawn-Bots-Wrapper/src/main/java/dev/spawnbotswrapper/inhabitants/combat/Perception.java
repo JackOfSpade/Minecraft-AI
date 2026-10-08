@@ -36,9 +36,10 @@ public final class Perception {
     }
 
     /**
-     * The only hard-coded distance rule: a bot never engages (acquires, chases, pursues) a target it measures farther than
-     * this many blocks. Sight itself has no such limit; the reaction-time formula still reaches its legacy-named {@code at64}
-     * value at 64 blocks, independently of this engagement cap.
+     * The only hard-coded acquisition rule: a bot never starts an engagement with a target it measures farther than this
+     * many blocks. Sight itself has no such limit, and a chase already begun inside this radius continues while its target
+     * remains visible; the reaction-time formula still reaches its legacy-named {@code at64} value at 64 blocks,
+     * independently of this acquisition cap.
      */
     public static final double ENGAGE_LIMIT = 16.0;
 
