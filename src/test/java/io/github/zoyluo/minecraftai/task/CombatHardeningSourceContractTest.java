@@ -114,7 +114,8 @@ final class CombatHardeningSourceContractTest {
         assertFalse(watcher.contains("target_outside_leash"),
                 "defensive combat must not impose the retired owner-distance leash");
         String combat = read("task/CombatTask.java");
-        assertTrue(combat.contains("&& !canShootFromWhereItStands(bot, target)"));
+        assertTrue(combat.contains("if (refusal != null)"),
+                "the ranged loop must hold a ready weapon whenever the consolidated shot-legality check refuses it");
         assertTrue(combat.contains("StrikeLegality.shotRefusal(bot, target, RangedWeapon.shapeOf("),
                 "a ranged weapon must never be shot into the owner or another bot (or without a clear line)");
         assertTrue(read("action/StrikeLegality.java").contains("\"friendly_on_line_of_fire\""),

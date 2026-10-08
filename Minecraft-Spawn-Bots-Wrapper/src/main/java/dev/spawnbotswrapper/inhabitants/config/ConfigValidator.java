@@ -182,7 +182,7 @@ public final class ConfigValidator {
         }
     }
 
-    /** Smallest and largest {@code pvpbotSettings.maxTargetDistance} (blocks); 128 is PvP BOT's catalog maximum (the shipped value is 32, the aggro engage limit). */
+    /** Smallest and largest {@code pvpbotSettings.maxTargetDistance} (blocks); 128 is PvP BOT's catalog maximum (the shipped value is 16, the aggro engage limit). */
     public static final double MIN_TARGET_DISTANCE = 4.0;
     public static final double MAX_TARGET_DISTANCE = 128.0;
 

@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.perception.CreatureSenses;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -32,25 +33,26 @@ import net.minecraft.world.phys.Vec3;
  * living entity inside the aggressor's view cone, so a bot fighting a zombie next to the owner is never taken for hostile to the
  * owner. For a swing and a charge no hostile mob ({@link Enemy}) may additionally be within the aggressor's reach + 1.</p>
  * <ul>
- *   <li>DRAW: a bow used for {@link #DRAW_TICKS} consecutive sampled ticks, a trident raised, or a charged crossbow in hand, aimed at
- *       the victim (dot &gt;= {@link #AIM_DOT}, within {@link #AIM_RANGE}), exclusive: MARKED ("aim").</li>
+ *   <li>WRAPPER AGGRO: when the hostile-inhabitants wrapper has confirmed one of its bots is hunting a protected player, that factual
+ *       target immediately becomes MARKED ("aggro"), without requiring the companion to see through a wall.</li>
+ *   <li>DRAW: a bow drawn, a trident raised, or a charged crossbow in hand, aimed at the victim (dot &gt;= {@link #AIM_DOT}, within
+ *       {@link #AIM_RANGE}), exclusive: MARKED ("aim") on the first sampled tick.</li>
  *   <li>SWING: a swing starts while facing the victim (dot &gt;= {@link #FACING_DOT}) within the interaction range + 1, exclusive, no
  *       hostile mob in reach: SUSPECT ("swing").</li>
- *   <li>ARMED CHARGE: a sword, axe, mace, spear or trident in the main hand, facing the victim, within {@link #CHARGE_RANGE}, the distance
- *       down by {@link #CHARGE_DROP} over {@link #CHARGE_WINDOW} ticks, sustained {@link #CHARGE_SUSTAIN} ticks, exclusive, no hostile
- *       mob in reach: SUSPECT ("charge").</li>
+ *   <li>ARMED CHARGE: a sword, axe, mace, spear or trident in the main hand, facing the victim, within {@link #CHARGE_RANGE}, closing
+ *       over {@link #CHARGE_WINDOW} ticks, exclusive, no hostile mob in reach: MARKED ("charge") before a melee hit lands.</li>
  * </ul>
  */
 public final class HostileBotIntent {
     static final double SAMPLE_RANGE = 48.0D;
-    static final int DRAW_TICKS = 12;
+    static final int DRAW_TICKS = 1;
     static final double AIM_DOT = 0.94D;
     static final double AIM_RANGE = 40.0D;
     static final double FACING_DOT = 0.9D;
-    static final double CHARGE_RANGE = 6.0D;
-    static final double CHARGE_DROP = 1.0D;
-    static final int CHARGE_WINDOW = 10;
-    static final int CHARGE_SUSTAIN = 10;
+    static final double CHARGE_RANGE = 16.0D;
+    static final double CHARGE_DROP = 0.25D;
+    static final int CHARGE_WINDOW = 4;
+    static final int CHARGE_SUSTAIN = 1;
     private static final int HISTORY = 16; // power of two, larger than CHARGE_WINDOW
     private static final int PRUNE_EVERY_TICKS = 200;
 
@@ -86,6 +88,9 @@ public final class HostileBotIntent {
     }
 
     private static final Map<UUID, Track> TRACKS = new HashMap<>();
+    /** Optional, compile-free bridge to the hostile-inhabitants controller's factual confirmed target. */
+    private static volatile Method wrapperConfirmedTarget;
+    private static volatile boolean wrapperBridgeResolved;
 
     private HostileBotIntent() {
     }
@@ -159,6 +164,11 @@ public final class HostileBotIntent {
             if (victims == null || !aggressor.isAlive() || aggressor.isSpectator()) {
                 continue;
             }
+            // The wrapper owns the hostile PvP bot's target state. It has already applied its own
+            // observation and reaction rules, so this is a factual aggro relationship—not an
+            // omniscient proximity guess. Mark it before the companion-perception gate: defensive
+            // combat must start even when the attacker is currently around a corner.
+            markWrapperAggroTargets(aggressor, victims, now);
             if (!perceived(aggressor, observers)) {
                 // Nobody on the protected side has noticed this player (no bot has seen or heard it, no owner is looking at it): its
                 // intent is not something anyone could witness, so nothing is sampled and the sustained counters start over.
@@ -204,7 +214,7 @@ public final class HostileBotIntent {
         pair.push(now, distance);
         double facing = facing(aggressor, victim);
 
-        // DRAW: a drawn bow / raised trident / charged crossbow aimed at the victim, exclusively, sustained.
+        // DRAW: a drawn bow / raised trident / charged crossbow aimed at the victim, exclusively.
         if (holdsDrawnRanged(aggressor) && distance <= AIM_RANGE && facing >= AIM_DOT && isNearestInCone(aggressor, victim, AIM_DOT)) {
             if (++pair.drawTicks >= DRAW_TICKS) {
                 HostileBotLedger.markPlayer(aggressor, victim, now, "aim");
@@ -219,7 +229,9 @@ public final class HostileBotIntent {
             HostileBotLedger.suspectPlayer(aggressor, victim, now, "swing");
         }
 
-        // ARMED CHARGE: closing on the victim with a melee weapon, facing it, sustained.
+        // ARMED CHARGE: closing on the victim with a melee weapon, facing it. This is a
+        // pre-hit defence signal, not merely pressure: an attacker at melee range should not get
+        // a free first swing while the companion waits for a damage callback.
         boolean charging = false;
         if (distance <= CHARGE_RANGE && facing >= FACING_DOT && holdsMeleeWeapon(aggressor)) {
             double before = pair.distanceAgo(now, CHARGE_WINDOW);
@@ -228,10 +240,56 @@ public final class HostileBotIntent {
         }
         if (charging) {
             if (++pair.chargeTicks >= CHARGE_SUSTAIN) {
-                HostileBotLedger.suspectPlayer(aggressor, victim, now, "charge");
+                HostileBotLedger.markPlayer(aggressor, victim, now, "charge");
             }
         } else {
             pair.chargeTicks = 0;
+        }
+    }
+
+    /** Records the wrapper's actual confirmed hunt target, if the optional hostile-inhabitants addon is loaded. */
+    private static void markWrapperAggroTargets(ServerPlayer aggressor, List<ServerPlayer> victims, long now) {
+        String targetName = wrapperConfirmedTarget(aggressor);
+        if (targetName == null) {
+            return;
+        }
+        for (ServerPlayer victim : victims) {
+            if (victim.isAlive() && targetName.equalsIgnoreCase(victim.getGameProfile().name())) {
+                HostileBotLedger.markPlayer(aggressor, victim, now, "aggro");
+                return;
+            }
+        }
+    }
+
+    /**
+     * Reads {@code InhabitantsMod.aggroConfirmedTarget} reflectively so Minecraft-AI remains usable without the wrapper.
+     * A missing or changed optional addon simply returns no target and leaves the visible weapon fallbacks active.
+     */
+    private static String wrapperConfirmedTarget(ServerPlayer aggressor) {
+        Method method = wrapperConfirmedTarget;
+        if (!wrapperBridgeResolved) {
+            synchronized (HostileBotIntent.class) {
+                if (!wrapperBridgeResolved) {
+                    try {
+                        Class<?> wrapper = Class.forName("dev.spawnbotswrapper.inhabitants.InhabitantsMod", false,
+                                HostileBotIntent.class.getClassLoader());
+                        wrapperConfirmedTarget = wrapper.getMethod("aggroConfirmedTarget", String.class);
+                    } catch (ReflectiveOperationException | LinkageError ignored) {
+                        wrapperConfirmedTarget = null;
+                    }
+                    wrapperBridgeResolved = true;
+                }
+                method = wrapperConfirmedTarget;
+            }
+        }
+        if (method == null) {
+            return null;
+        }
+        try {
+            Object target = method.invoke(null, aggressor.getGameProfile().name());
+            return target instanceof String name && !name.isBlank() ? name : null;
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return null;
         }
     }
 

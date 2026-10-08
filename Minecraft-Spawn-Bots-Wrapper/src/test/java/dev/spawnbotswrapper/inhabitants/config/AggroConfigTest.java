@@ -57,7 +57,7 @@ class AggroConfigTest {
         for (var field : InhabitantsConfig.Aggro.class.getFields()) {
             String n = field.getName().toLowerCase();
             assertFalse(n.contains("range") || n.contains("leash") || n.contains("radius") || n.contains("engage"),
-                    "the 32 block engage limit is a constant, not a setting: " + field.getName());
+                    "the 16 block engage limit is a constant, not a setting: " + field.getName());
         }
     }
 

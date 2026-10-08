@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Noticing, chasing and the rules around them: the continuous reaction time, the view cone, hearing (vanilla vibrations),
- * the 32 block engage limit, NO MAGIC (only what is perceived), the CONFIRMED engagement state machine, being hit, mobs,
+ * the 16 block engage limit, NO MAGIC (only what is perceived), the CONFIRMED engagement state machine, being hit, mobs,
  * somebody else's forced target, validity, inert modes and failures. The whole hunt (pursue, search, return) is
  * {@link AggroHuntTest}. Everything runs against fakes, including a small stand-in for PvP BOT's own target
  * resolution; no Minecraft, no PvP BOT.
@@ -64,9 +64,9 @@ class AggroControllerTest {
 
     @Test
     void everyDistanceHasItsOwnReactionTime() {
-        // 0.5 + 1.5 * d / 64: 10 blocks 0.734 s (15 ticks), 20 blocks 0.969 s (20 ticks), 30 blocks 1.203 s (25 ticks)
-        int[] distances = {10, 20, 30};
-        int[] expected = {15, 20, 25};
+        // 0.5 + 1.5 * d / 64: 4 blocks 0.594 s (12 ticks), 10 blocks 0.734 s (15 ticks), 15 blocks 0.852 s (18 ticks)
+        int[] distances = {4, 10, 15};
+        int[] expected = {12, 15, 18};
         for (int i = 0; i < distances.length; i++) {
             Sim sim = new Sim();
             sim.bot.look = new double[]{1, 0};
@@ -103,9 +103,9 @@ class AggroControllerTest {
 
     @Test
     void aPlayerAtTheEdgeOfTheEngageLimitIsNoticedAtItsNormalReactionTime() {
-        steve.x = 32; // 1.25 s = 25 ticks
+        steve.x = 16; // 0.875 s = 18 ticks
         int ticks = ticksUntilChase(80);
-        assertTrue(ticks >= 26 && ticks <= 28, "32 blocks: 25 ticks of exposure: " + ticks);
+        assertTrue(ticks >= 19 && ticks <= 21, "16 blocks: 18 ticks of exposure: " + ticks);
     }
 
     @Test
@@ -153,7 +153,7 @@ class AggroControllerTest {
     void perceptionOffMeansPlainLineOfSightAtOnce() {
         s.config = s.config.withPerception(s.config.perception().disabled());
         bot.look = new double[]{-1, 0}; // steve is BEHIND the bot: omnidirectional now
-        steve.x = 30;
+        steve.x = 15;
         int ticks = ticksUntilChase(10);
         assertTrue(ticks > 0 && ticks <= 3, "no cone, no time: the first scan notices: " + ticks);
     }
@@ -191,41 +191,41 @@ class AggroControllerTest {
         assertTrue(ticksUntilChase(40) > 0);
     }
 
-    // ---------------------------------------------------------------- the engage limit (32 blocks, the one hard rule)
+    // ---------------------------------------------------------------- the engage limit (16 blocks, the one hard rule)
 
     @Test
     void aPlayerJustInsideTheEngageLimitIsEngagedAndJustOutsideIsNot() {
-        steve.x = 31.9;
-        assertTrue(ticksUntilChase(80) > 0, "31.9 blocks: engaged");
+        steve.x = 15.9;
+        assertTrue(ticksUntilChase(80) > 0, "15.9 blocks: engaged");
         Sim far = new Sim();
         far.bot.look = new double[]{1, 0};
-        far.steve.x = 32.1;
+        far.steve.x = 16.1;
         far.run(300);
-        assertEquals(List.of(), far.up.callsOf("set"), "32.1 blocks: never engaged, however long it is in plain sight");
+        assertEquals(List.of(), far.up.callsOf("set"), "16.1 blocks: never engaged, however long it is in plain sight");
         assertEquals(Phase.IDLE, far.phase());
         assertEquals(0, far.bot.canSeeCalls, "beyond the limit no ray is cast at all (the cost stays low)");
     }
 
     @Test
     void theChaseContinuesWhileTheTargetIsInSightUpToTheEngageLimit() {
-        steve.x = 31;
+        steve.x = 15;
         assertTrue(ticksUntilChase(80) > 0);
         s.run(400);
         assertEquals(Phase.CHASE, s.phase());
-        steve.x = 31.9;
+        steve.x = 15.9;
         s.run(200);
-        assertEquals(Phase.CHASE, s.phase(), "31.9 blocks, still in sight and engaged");
+        assertEquals(Phase.CHASE, s.phase(), "15.9 blocks, still in sight and engaged");
         assertEquals(List.of(), s.up.callsOf("clear"), "never given up");
     }
 
     @Test
     void aTargetSightedBeyondTheEngageLimitIsTooFarAndTheBotGoesHome() {
-        steve.x = 30;
+        steve.x = 15;
         assertTrue(ticksUntilChase(80) > 0);
         bot.x = 3; // it moved on while chasing: home is where it began
         steve.x = 70; // still in plain sight, now sighted at 67 blocks
         s.run(1);
-        assertEquals(Phase.RETURN, s.phase(), "sighted beyond 32: too far, back home");
+        assertEquals(Phase.RETURN, s.phase(), "sighted beyond 16: too far, back home");
         assertEquals(1L, s.controller.stats().giveUps().get("too far"));
         assertEquals(List.of("clear Warden7"), s.up.callsOf("clear"));
         assertTrue(s.log.debug.stream().anyMatch(l -> l.contains("too far")), s.log.debug.toString());
@@ -235,7 +235,7 @@ class AggroControllerTest {
 
     @Test
     void tooFarIsDecidedOnlyFromASightingNotFromTheTrueDistance() {
-        steve.x = 30;
+        steve.x = 15;
         assertTrue(ticksUntilChase(80) > 0);
         bot.blind.add("Steve");
         steve.x = 200; // far away and unseen: the bot cannot know
@@ -247,7 +247,7 @@ class AggroControllerTest {
         Pos goal = s.planner.goals.isEmpty() ? null : s.planner.goals.get(0);
         s.run(2);
         goal = s.planner.goals.get(0);
-        assertEquals(30.0, goal.x(), 1e-9, "it walks to where it LAST SAW the player, not to the true position");
+        assertEquals(15.0, goal.x(), 1e-9, "it walks to where it LAST SAW the player, not to the true position");
     }
 
     // ---------------------------------------------------------------- behind, hearing (vanilla vibrations), ambush
@@ -431,7 +431,7 @@ class AggroControllerTest {
 
     @Test
     void whileConfirmingTheBotFacesAndClosesInButPvpBotHoldsNoTarget() {
-        steve.x = 20;
+        steve.x = 12;
         assertTrue(ticksUntilChase(80) > 0);
         bot.blind.add("Steve");
         s.run(1);
@@ -671,17 +671,17 @@ class AggroControllerTest {
         steve.x = 90;
         s.shot(steve, 1, 0);
         s.run(2);
-        assertEquals(Perception.ENGAGE_LIMIT, s.planner.goals.get(0).x(), 1e-9, "no block on the line: it ends at 32 blocks, not at the shooter");
+        assertEquals(Perception.ENGAGE_LIMIT, s.planner.goals.get(0).x(), 1e-9, "no block on the line: it ends at the engage limit, not at the shooter");
     }
 
     @Test
     void aProjectileFromAShooterThatIsSeenIsChasedOnlyAfterTheReactionTime() {
-        steve.x = 30; // in plain view, 30 blocks ahead: 0.5 + 1.5 * 30 / 64 = 1.203 s
+        steve.x = 15; // in plain view, 15 blocks ahead: 0.5 + 1.5 * 15 / 64 = 0.852 s
         s.shot(steve, 1, 0);
-        s.run(20);
+        s.run(14);
         assertEquals(List.of(), s.up.callsOf("set"), "it turned and looks, but the reaction time applies");
         int ticks = ticksUntilChase(60);
-        assertTrue(ticks > 0 && ticks <= 12, "noticed by sight once the exposure ran long enough: " + ticks);
+        assertTrue(ticks > 0 && ticks <= 8, "noticed by sight once the exposure ran long enough: " + ticks);
         assertEquals("Steve", s.controller.confirmedTarget("Warden7"));
     }
 
@@ -689,7 +689,7 @@ class AggroControllerTest {
     void aProjectileFromBeyondTheEngageLimitIsNeverEngagedOnlyInvestigatedAlongItsLine() {
         // RULES no magic knowledge: the hit gives a DIRECTION only. A hit starts the hunt (RULES 'Engagement') as an
         // investigation toward where the line ends (at most the engage limit away from the bot); no forced target and no CHASE
-        // without a sighting within 32 blocks.
+        // without a sighting within 16 blocks.
         steve.x = 70;
         s.shot(steve, 1, 0);
         s.run(2);
@@ -697,12 +697,12 @@ class AggroControllerTest {
         assertEquals(List.of(), s.up.callsOf("set"), "but never an engagement");
         assertEquals(Perception.ENGAGE_LIMIT, bot.lastTrace[3], 1e-9, "the traced line is at most the engage limit long");
         assertTrue(s.planner.goals.get(0).x() <= bot.x + Perception.ENGAGE_LIMIT + 1e-9,
-                "it goes to a point within 32 blocks of where it was hit, not to the shooter at 70");
+                "it goes to a point within 16 blocks of where it was hit, not to the shooter at 70");
         for (int i = 0; i < 200; i++) {
             s.run(1);
             assertNotEquals(Phase.CHASE, s.phase());
         }
-        assertEquals(List.of(), s.up.callsOf("set"), "a shooter sighted beyond 32 is never engaged");
+        assertEquals(List.of(), s.up.callsOf("set"), "a shooter sighted beyond 16 is never engaged");
     }
 
     @Test

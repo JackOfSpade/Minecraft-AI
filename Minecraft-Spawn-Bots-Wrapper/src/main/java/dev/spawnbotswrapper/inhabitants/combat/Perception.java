@@ -12,7 +12,7 @@ import java.util.function.BooleanSupplier;
  * </pre>
  * <ul>
  *   <li><b>distance</b> is eye to eye, in blocks, continuous: 0.5 s up close, 2.0 s at 32 blocks by default, every distance
- *       its own number. The 32 is {@link #ENGAGE_LIMIT}, the only hard-coded distance rule (a bot may still SEE farther, but
+ *       its own number. The 16 is {@link #ENGAGE_LIMIT}, the only hard-coded distance rule (a bot may still SEE farther, but
  *       never engages beyond it; that decision is the caller's).</li>
  *   <li><b>angleFactor</b>: 1 up to {@code fullAttentionHalfAngleDeg} (30), rising linearly to {@code peripheralMultiplier}
  *       (2) at {@code peripheralHalfAngleDeg} (100); beyond that the subject is not seen at all.</li>
@@ -40,7 +40,7 @@ public final class Perception {
      * this many blocks. Sight itself has no such limit; the reaction-time formula still reaches its legacy-named {@code at64}
      * value at 64 blocks, independently of this engagement cap.
      */
-    public static final double ENGAGE_LIMIT = 32.0;
+    public static final double ENGAGE_LIMIT = 16.0;
 
     /** One server tick in seconds: the granularity of exposure. */
     public static final double TICK_SECONDS = 0.05;

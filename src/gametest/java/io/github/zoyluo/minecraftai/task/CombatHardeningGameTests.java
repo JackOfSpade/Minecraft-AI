@@ -437,12 +437,12 @@ public final class CombatHardeningGameTests {
         });
     }
 
-    @GameTest(environment = ENV + "observed_drowned_outside_the_leash_is_shot_not_looped", maxTicks = 300 + PerceptionFixtures.MAX_WAIT_TICKS)
-    public void observedDrownedOutsideTheLeashIsShotNotLooped(GameTestHelper context) {
+    @GameTest(environment = ENV + "observed_drowned_at_range_is_shot_not_looped", maxTicks = 300 + PerceptionFixtures.MAX_WAIT_TICKS)
+    public void observedDrownedAtRangeIsShotNotLooped(GameTestHelper context) {
         AIPlayerEntity bot = spawnCorridor(context, "RangedDrownedGT", 110, -6, 20);
         var world = context.getLevel();
         BlockPos origin = bot.blockPosition().immutable();
-        // A one-deep pool thirteen blocks east: outside the eight-block melee leash, in plain view.
+        // A one-deep pool thirteen blocks east, in plain view.
         for (int dx = 12; dx <= 14; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 world.setBlock(origin.offset(dx, -2, dz), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
@@ -471,9 +471,8 @@ public final class CombatHardeningGameTests {
         PerceptionFixtures.faceToward(bot, drowned);
         PerceptionFixtures.afterNoticed(context, bot, List.of(drowned), since -> {
         int arrowsBefore = arrows(bot);
-        require(context, !CombatTask.isWithinDefensiveLeash(origin, drowned.blockPosition())
-                        && CombatTask.canShootFromWhereItStands(bot, drowned),
-                "the drowned fixture was not an outside-the-leash shootable target, dist="
+        require(context, CombatTask.canShootFromWhereItStands(bot, drowned),
+                "the drowned fixture was not a shootable target, dist="
                         + bot.distanceTo(drowned));
 
         DangerWatcher.INSTANCE.scanBot(world.getServer(), bot);

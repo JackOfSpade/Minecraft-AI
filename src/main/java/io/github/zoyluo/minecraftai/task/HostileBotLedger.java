@@ -30,7 +30,8 @@ import net.minecraft.world.entity.LivingEntity;
  * </ul>
  * A mark lasts {@code behaviour.targeting.aggressorMemoryTicks} (600) level game ticks after the last qualifying act and is cleared
  * when the aggressor dies or the server stops. The ledger is GLOBAL, keyed by the aggressor's UUID: an aggressor that hit one owner's
- * bot is a target for every Minecraft-AI bot that sees it.
+ * bot is a target for every Minecraft-AI bot that sees it. MARKED entries also remember the protected victim(s) of the qualifying
+ * act so the attacked companion or owner can switch to the combat brain immediately, even before line of sight is available.
  *
  * <p>{@link Core} is the pure part (UUIDs and game ticks only). The adapters below read the config, the level game time and the
  * player kinds. Time is ALWAYS the level game time ({@code level.getGameTime()}); a mock player's {@code tickCount} never advances.</p>
@@ -48,6 +49,8 @@ public final class HostileBotLedger {
     /** The pure ledger: no Minecraft types, testable without a server. */
     public static final class Core {
         private final Map<UUID, Entry> entries = new ConcurrentHashMap<>();
+        /** Per-aggressor protected victims of MARKED acts, used only for immediate defensive handoff. */
+        private final Map<UUID, Map<UUID, Long>> markedVictims = new ConcurrentHashMap<>();
 
         /** MARKED as of {@code tick} (a mark refreshes the tick and promotes a SUSPECT). */
         public void mark(UUID aggressor, long tick, String reason) {
@@ -55,6 +58,16 @@ public final class HostileBotLedger {
                 return;
             }
             entries.put(aggressor, new Entry(Level.MARKED, tick, reason));
+        }
+
+        /** MARKED as of {@code tick}, specifically against {@code victim}. */
+        public void markAgainst(UUID aggressor, UUID victim, long tick, String reason) {
+            mark(aggressor, tick, reason);
+            if (aggressor == null || victim == null) {
+                return;
+            }
+            markedVictims.computeIfAbsent(aggressor, ignored -> new ConcurrentHashMap<>())
+                    .merge(victim, tick, Math::max);
         }
 
         /**
@@ -79,6 +92,16 @@ public final class HostileBotLedger {
             return entry != null && entry.level() == Level.MARKED && now - entry.lastActTick() <= memoryTicks;
         }
 
+        /** True while this particular protected victim has a live MARK from the aggressor. */
+        public boolean isMarkedAgainst(UUID aggressor, UUID victim, long now, int memoryTicks) {
+            if (!isMarked(aggressor, now, memoryTicks) || victim == null) {
+                return false;
+            }
+            Map<UUID, Long> victims = markedVictims.get(aggressor);
+            Long lastAct = victims == null ? null : victims.get(victim);
+            return lastAct != null && now - lastAct <= memoryTicks;
+        }
+
         /** True while the aggressor is a SUSPECT (not marked) and its last act is at most {@code memoryTicks} old. */
         public boolean isSuspect(UUID aggressor, long now, int memoryTicks) {
             Entry entry = aggressor == null ? null : entries.get(aggressor);
@@ -93,11 +116,13 @@ public final class HostileBotLedger {
         public void clearAggressor(UUID aggressor) {
             if (aggressor != null) {
                 entries.remove(aggressor);
+                markedVictims.remove(aggressor);
             }
         }
 
         public void clearAll() {
             entries.clear();
+            markedVictims.clear();
         }
 
         public boolean isEmpty() {
@@ -107,6 +132,8 @@ public final class HostileBotLedger {
         /** Drops every entry whose last act is more than {@code memoryTicks} old. */
         public void prune(long now, int memoryTicks) {
             entries.values().removeIf(entry -> now - entry.lastActTick() > memoryTicks);
+            markedVictims.values().forEach(victims -> victims.values().removeIf(lastAct -> now - lastAct > memoryTicks));
+            markedVictims.entrySet().removeIf(entry -> entry.getValue().isEmpty());
         }
     }
 
@@ -156,7 +183,7 @@ public final class HostileBotLedger {
      */
     public static void markPlayer(ServerPlayer aggressor, Entity victim, long tick, String reason) {
         boolean fresh = !isMarked(aggressor.getUUID(), tick);
-        mark(aggressor.getUUID(), tick, reason);
+        CORE.markAgainst(aggressor.getUUID(), victim.getUUID(), tick, reason);
         if (fresh) {
             io.github.zoyluo.minecraftai.log.BotLog.danger(botOf(victim), "hostile_bot_marked",
                     "aggressor", aggressor.getGameProfile().name(), "victim", victim.getName().getString(), "reason", reason);
@@ -231,6 +258,27 @@ public final class HostileBotLedger {
             return false;
         }
         return seenThisTick(bot, player);
+    }
+
+    /**
+     * True if a marked foreign PvP bot's qualifying act targeted this companion or the player who owns it. Unlike
+     * {@link #isVisibleAggressor(AIPlayerEntity, ServerPlayer)}, this deliberately has no sight or distance clause: it is the
+     * factual aggro signal that activates the defensive PvP brain, including through a wall.
+     */
+    public static boolean isMarkedAgainst(AIPlayerEntity bot, ServerPlayer player) {
+        if (bot == null || player == null || player == bot || CORE.isEmpty() || !hostileBotsEnabled()) {
+            return false;
+        }
+        if (player.level() != bot.level() || !player.isAlive() || !isMarkableForeignBot(player)) {
+            return false;
+        }
+        long now = bot.level().getGameTime();
+        if (CORE.isMarkedAgainst(player.getUUID(), bot.getUUID(), now, memoryTicks())) {
+            return true;
+        }
+        return AIPlayerManager.INSTANCE.ownerOf(bot)
+                .map(owner -> CORE.isMarkedAgainst(player.getUUID(), owner, now, memoryTicks()))
+                .orElse(false);
     }
 
     /**

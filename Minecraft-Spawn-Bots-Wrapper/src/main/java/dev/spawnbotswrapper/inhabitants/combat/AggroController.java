@@ -23,7 +23,7 @@ import java.util.function.Supplier;
 
 /**
  * The "line of sight hunter" of the hostile inhabitants: what they do about players (and their companions), decided by
- * what they can SEE and HEAR. The one hard-coded distance rule is the ENGAGE LIMIT ({@link #ENGAGE_LIMIT}, 32 blocks):
+ * what they can SEE and HEAR. The one hard-coded distance rule is the ENGAGE LIMIT ({@link #ENGAGE_LIMIT}, 16 blocks):
  * sight has no block limit in the view cone, but a bot never engages a target it sees (and measures) farther away.
  * <pre>
  *   IDLE --(noticed)--&gt; CHASE --(lost)--&gt; PURSUE --(arrived or blocked)--&gt; SEARCH --(10 s)--&gt; RETURN --(home)--&gt; IDLE

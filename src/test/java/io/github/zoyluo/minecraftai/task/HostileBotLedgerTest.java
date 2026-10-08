@@ -35,6 +35,20 @@ class HostileBotLedgerTest {
     }
 
     @Test
+    void aMarkAgainstOneProtectedVictimDoesNotStartCombatForAnother() {
+        HostileBotLedger.Core ledger = new HostileBotLedger.Core();
+        UUID aggressor = UUID.randomUUID();
+        UUID attacked = UUID.randomUUID();
+        UUID bystander = UUID.randomUUID();
+        ledger.markAgainst(aggressor, attacked, 100L, "aim");
+        assertTrue(ledger.isMarkedAgainst(aggressor, attacked, 100L + MEMORY, MEMORY));
+        assertFalse(ledger.isMarkedAgainst(aggressor, bystander, 100L, MEMORY));
+        assertFalse(ledger.isMarkedAgainst(aggressor, attacked, 100L + MEMORY + 1, MEMORY));
+        ledger.markAgainst(aggressor, attacked, 500L, "hit");
+        assertTrue(ledger.isMarkedAgainst(aggressor, attacked, 500L + MEMORY, MEMORY));
+    }
+
+    @Test
     void aSuspectIsPromotedByAMark() {
         HostileBotLedger.Core ledger = new HostileBotLedger.Core();
         UUID bot = UUID.randomUUID();

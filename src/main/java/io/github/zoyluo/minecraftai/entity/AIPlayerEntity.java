@@ -435,6 +435,18 @@ public class AIPlayerEntity extends ServerPlayer {
         // Intentionally empty: companion inventory and equipment never leave the companion on death.
     }
 
+    /**
+     * Keep the retained loadout out of third-party grave hooks as well.  Fiw Graves injects into
+     * {@code ServerPlayer.dropAllDeathLoot} and otherwise clears every inventory slot into a
+     * grave-head before the ten-second companion revive can happen.  Dispatching through this
+     * subclass override bypasses that player-wide hook only for Minecraft-AI companions; human
+     * players still use their normal grave behaviour.
+     */
+    @Override
+    protected void dropAllDeathLoot(ServerLevel level, DamageSource source) {
+        // Intentionally empty: no vanilla or third-party death-loot processing for companions.
+    }
+
     @Override
     public String getIpAddress() {
         return "127.0.0.1";

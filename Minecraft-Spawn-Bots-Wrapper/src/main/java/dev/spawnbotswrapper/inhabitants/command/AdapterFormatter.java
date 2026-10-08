@@ -110,7 +110,7 @@ final class AdapterFormatter {
         if (!c.autoTargetEnabled()) {
             out.add(label("  autoTarget is off: PvP BOT itself never picks a target on sight. That is the intended state while this "
                     + "addon's line-of-sight hunter (config aggro) is on, which notices players by line of sight "
-                    + "(sight has no block limit in the view cone; engagement is limited to 32 blocks) and reacts to whoever hits "
+                    + "(sight has no block limit in the view cone; engagement is limited to 16 blocks) and reacts to whoever hits "
                     + "them; with the hunter off inhabitants stay passive until "
                     + "something attacks them (pvpbotSettings.autoTargetEnabled in this addon's config, or pvpbot settings "
                     + "auto-target true, hands acquisition back to PvP BOT)."));

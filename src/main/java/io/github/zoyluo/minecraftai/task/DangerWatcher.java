@@ -505,7 +505,7 @@ public final class DangerWatcher {
         // healing) retain priority. Once they have declined ownership, a current vanilla aggro
         // target hands this exact AI player to PvP BOT's combat brain. No owner-distance leash is
         // applied: the fallback navigation continues following the target beyond PvP BOT's normal
-        // 32-block engage horizon.
+        // local engagement horizon.
         boolean lowHealthRecovery = bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp();
         if (retreatFollowMode || lowHealthRecovery) {
             PvpBotCombatBrain.INSTANCE.release(bot);
@@ -1611,8 +1611,9 @@ public final class DangerWatcher {
     }
 
     /**
-     * Finds a loaded mob whose own vanilla goal currently targets this companion or its owner.
-     * It intentionally does not consult sight, recent damage, or the old owner-radius leash.
+     * Finds a loaded mob whose own vanilla goal targets this companion or its owner, or a marked foreign PvP bot whose
+     * qualifying act targeted either protected victim. It intentionally does not consult sight, recent damage, or the old
+     * owner-radius leash.
      */
     private static Optional<LivingEntity> immediateAggressor(AIPlayerEntity bot) {
         if (bot.level().getServer() == null) {
@@ -1631,6 +1632,10 @@ public final class DangerWatcher {
                     owner.getBoundingBox().inflate(VANILLA_AGGRO_SCAN_RADIUS),
                     mob -> mob.getTarget() == owner && !CombatCore.isFriendly(bot, mob)));
         }
+        candidates.addAll(bot.level().getServer().getPlayerList().getPlayers().stream()
+                .filter(player -> HostileBotLedger.isMarkedAgainst(bot, player))
+                .map(player -> (LivingEntity) player)
+                .toList());
         final net.minecraft.server.level.ServerPlayer liveOwner = owner;
         return candidates.stream()
                 .filter(LivingEntity::isAlive)
@@ -1643,6 +1648,9 @@ public final class DangerWatcher {
     }
 
     private static boolean isAggroTargetingOwner(AIPlayerEntity bot, LivingEntity aggressor) {
+        if (aggressor instanceof net.minecraft.server.level.ServerPlayer player) {
+            return HostileBotLedger.isMarkedAgainst(bot, player);
+        }
         if (!(aggressor instanceof Mob mob) || bot.level().getServer() == null) {
             return false;
         }
@@ -1653,8 +1661,11 @@ public final class DangerWatcher {
                 .orElse(false);
     }
 
-    /** True only for the factual vanilla aggro relation, with no sight or distance clause. */
+    /** True only for a factual vanilla aggro relation or a per-victim foreign-PvP-bot mark, with no sight or distance clause. */
     private static boolean isAggroTargetingBotOrOwner(AIPlayerEntity bot, LivingEntity aggressor) {
+        if (aggressor instanceof net.minecraft.server.level.ServerPlayer player) {
+            return HostileBotLedger.isMarkedAgainst(bot, player);
+        }
         if (!(aggressor instanceof Mob mob)) {
             return false;
         }

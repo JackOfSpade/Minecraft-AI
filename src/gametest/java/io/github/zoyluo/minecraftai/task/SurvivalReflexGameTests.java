@@ -35,7 +35,7 @@ import static io.github.zoyluo.minecraftai.task.ShelterGameTestFixtures.require;
 /**
  * Real-server proofs of the survival-reflex fixes from the 2026-09-29 session review: wounded-and-stalled
  * regeneration eating, the dark-trap reflex no longer firing under a tree canopy in daylight, a chat request
- * not cancelling a running SAFETY task, defensive combat not being assigned against an out-of-leash target,
+ * not cancelling a running SAFETY task, defensive combat starting for an observed hostile even beyond the former fixed radius,
  * the tool selector ignoring air/fluid, armor-equip and damage log coalescing, and diag_health_drop naming its
  * cause.
  */
@@ -500,10 +500,10 @@ public final class SurvivalReflexGameTests {
         despawnAndComplete(context, bot);
     }
 
-    // ---- 4: defensive combat is not assigned against a target already outside the leash ----
+    // ---- 4: defensive combat has no fixed owner-radius leash ----
 
-    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_out_of_leash_hostile_does_not_start_and_drop_combat_repeatedly", maxTicks = 600)
-    public void outOfLeashHostileDoesNotStartAndDropCombatRepeatedly(GameTestHelper context) {
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_observed_hostile_beyond_old_radius_gets_combat", maxTicks = 600)
+    public void observedHostileBeyondOldRadiusGetsCombat(GameTestHelper context) {
         ServerLevel world = context.getLevel();
         BlockPos feet = context.absolutePos(new BlockPos(20, 5, 270));
         buildFloor(world, feet, 14);
@@ -516,7 +516,7 @@ public final class SurvivalReflexGameTests {
             context.fail(Component.nullToEmpty("failed to create the husk fixture"));
             return;
         }
-        BlockPos huskFeet = feet.east(9); // inside the ten-block pressure range, outside the eight-block leash
+        BlockPos huskFeet = feet.east(9); // outside the retired eight-block radius, but still plainly observable
         husk.setPersistenceRequired();
         husk.setNoAi(true);
         husk.snapTo(huskFeet.getX() + 0.5D, huskFeet.getY(), huskFeet.getZ() + 0.5D, 90.0F, 0.0F);
@@ -531,31 +531,21 @@ public final class SurvivalReflexGameTests {
             if (ticks[0] == 40) {
                 require(context, DangerWatcher.hasObservableHostilePressure(bot),
                         "fixture: the husk is not observable hostile pressure");
-                require(context, !CombatTask.isWithinDefensiveLeash(bot.blockPosition(), husk.blockPosition()),
-                        "fixture: the husk is inside the leash");
             }
-            TaskManager.INSTANCE.getActive(bot).ifPresent(task -> {
-                if (task instanceof CombatTask) {
-                    combats.add(task);
-                }
-            });
-            if (++ticks[0] < 200) {
-                return false;
+            Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
+            if (active instanceof CombatTask) {
+                husk.discard();
+                return true;
             }
-            husk.discard();
-            require(context, combats.isEmpty(),
-                    "defensive combat was assigned " + combats.size() + " time(s) against a target outside the leash");
-            List<String> lines = botLog(bot.getGameProfile().name());
-            require(context, lines != null, "the per-bot log is unavailable, so the disengage count cannot be checked");
-            long disengaged = lines.stream().filter(line -> line.contains("event=defensive_combat_disengaged")).count();
-            require(context, disengaged == 0, "defensive combat disengaged " + disengaged + " time(s) with target_left_leash");
-            return true;
+            require(context, ++ticks[0] < 400,
+                    "an observed hostile beyond the retired radius never got defensive combat");
+            return false;
         }, () -> cleanUp(bot));
     }
 
-    /** Positive control for the leash rule: a hostile INSIDE the leash still gets defensive combat. */
-    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_hostile_inside_the_leash_still_gets_defensive_combat", maxTicks = 700)
-    public void hostileInsideTheLeashStillGetsDefensiveCombat(GameTestHelper context) {
+    /** Positive control: a nearby observed hostile still gets defensive combat. */
+    @GameTest(environment = "minecraftai-gametest:survival_reflex_game_tests_nearby_hostile_gets_defensive_combat", maxTicks = 700)
+    public void nearbyHostileGetsDefensiveCombat(GameTestHelper context) {
         ServerLevel world = context.getLevel();
         BlockPos feet = context.absolutePos(new BlockPos(20, 5, 570));
         buildFloor(world, feet, 14);
@@ -577,16 +567,12 @@ public final class SurvivalReflexGameTests {
         int[] ticks = {0};
         TimeLockedRun.run(context, 600, () -> {
             world.setDayTime(18000L);
-            if (ticks[0] == 40) {
-                require(context, CombatTask.isWithinDefensiveLeash(bot.blockPosition(), husk.blockPosition()),
-                        "fixture: the husk is outside the leash");
-            }
             Task active = TaskManager.INSTANCE.getActive(bot).orElse(null);
             if (active instanceof CombatTask) {
                 husk.discard();
                 return true;
             }
-            require(context, ++ticks[0] < 400, "a hostile inside the leash never got defensive combat");
+            require(context, ++ticks[0] < 400, "a nearby observed hostile never got defensive combat");
             return false;
         }, () -> cleanUp(bot));
     }
