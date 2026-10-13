@@ -53,7 +53,7 @@ class PerceptionCallSiteClassificationTest {
         m.put("mode/SightClip.java", Counts.of(0, 0, 1));                      // definition: LivingEntity.hasLineOfSight with eyes that see through foliage and water (a sight ray, not a strike)
         m.put("perception/CreatureSenses.java", Counts.of(0, 1, 2));           // perception off (and a passive animal, a failed scan): the plain line-of-sight test with see-through eyes (SightClip); the projectile with perception off is exactly canObserveEntity
         // ---- creature noticing (converted)
-        m.put("task/DangerWatcher.java", Counts.of(4, 0, 4));                  // death-site hostiles, fight-before-rescue, trapped fight back (noticed AND on a physical line), last-resort shelter; physical: canReachThreat (owner-aware ray), the pressure set, the last stand, last-resort shelter
+        m.put("task/DangerWatcher.java", Counts.of(4, 0, 5));                  // death-site hostiles, fight-before-rescue, trapped fight back (noticed AND on a physical line), last-resort shelter; physical: canReachThreat (owner-aware ray), omnidirectional vanilla-aggro bridge, the pressure set, the last stand, last-resort shelter
         m.put("task/AggroSense.java", Counts.of(1, 1, 0));                     // mob aggressors noticed; object: the OWNER (a friend) being hurt, plain sight
         m.put("task/SharedVision.java", Counts.of(1, 0, 2));                   // seenByBotOrOwner: the bot part is noticing; ownerSees is the owner's see-through ray, ownerSeesStrict its plain collider ray
         m.put("task/CombatCore.java", Counts.of(2, 1, 8));                     // ranged threats, target acquisition (hostile: notice AND the physical line; non-hostile deliberate search: object AND the physical line); physical: strike/reach rays
@@ -64,6 +64,7 @@ class PerceptionCallSiteClassificationTest {
         m.put("task/EvadeTask.java", Counts.of(3, 1, 1));                      // object: the OWNER's direction (a friend), plain sight; physical: the source must still press on the bot
         m.put("task/FollowEscort.java", Counts.of(1, 0, 0));
         m.put("task/HostileBotLedger.java", Counts.of(0, 0, 1));             // a marked foreign bot gets the immediate defensive handoff only across a physical line
+        m.put("manager/AIPlayerManager.java", Counts.of(0, 0, 1));           // a recall/revive is reported as owner-adjacent only after the owner's collider line can see the companion
         m.put("perception/PerceptionCollector.java", Counts.of(1, 1, 0));      // what the LLM is told it sees: creatures noticed; dropped items observed
         m.put("log/DiagnosticLogger.java", Counts.of(1, 0, 0));
         m.put("brain/AmbientConversationCoordinator.java", Counts.of(1, 0, 0)); // ambient chat: a canned line needs an addressee the speaker has noticed

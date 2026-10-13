@@ -3,6 +3,8 @@ package io.github.zoyluo.minecraftai.baritone;
 import baritone.api.BaritoneAPI;
 import baritone.api.Settings;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.FallSafety;
+import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 
 /**
@@ -75,11 +77,18 @@ public final class BaritoneSettings {
     }
 
     public static void applyNavLimits() {
+        applyNavLimits(null);
+    }
+
+    /** Applies fall limits for one bot; only a fall that cannot kill its current body is planned. */
+    public static void applyNavLimits(AIPlayerEntity bot) {
         Settings settings = BaritoneAPI.getSettings();
         MinecraftAiConfig.Nav nav = MinecraftAiConfig.get().nav();
         MinecraftAiConfig.BaritoneCaps caps = nav.baritoneCaps();
-        int maxSafeFall = Math.max(1, nav.maxSafeFall());
-        // Without a bucket this is the only fall limit that is consulted.
+        int maxSafeFall = bot == null ? Math.max(1, nav.maxSafeFall()) : FallSafety.maxNonLethalFall(bot);
+        // Without a bucket this is the only fall limit that is consulted. For a bot it is
+        // recomputed from its current health before each planning context; the path fence still
+        // checks the exact body again before the movement begins.
         settings.maxFallHeightNoWater.value = maxSafeFall;
         // With a water bucket in the hotbar (Baritone's cost model checks the bot's own inventory and refuses the Nether) a higher fall
         // is planned, and only then; without the switch the bucket limit is the same number, so it can never exceed what the mod

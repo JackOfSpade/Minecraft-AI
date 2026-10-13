@@ -110,7 +110,10 @@ final class CombatHardeningSourceContractTest {
     void rangedOptionShieldFallbackAndFootingChecksStayWired() throws IOException {
         String watcher = read("task/DangerWatcher.java");
         assertTrue(watcher.contains("PvpBotCombatBrain.INSTANCE.tick(server, bot, aggressor)"),
-                "a factual vanilla aggro target must hand combat to the PvP BOT brain immediately");
+                "a factual hostile player must hand combat to the PvP BOT brain immediately");
+        assertTrue(watcher.contains("pvpPlayerAggressor = aggroTarget")
+                        && watcher.contains("isPvpBotPlayerAggressor"),
+                "ordinary hostile mobs must go directly to deterministic combat instead of pausing follow for PvP BOT");
         int bridgeAttempt = watcher.indexOf("PvpBotCombatBrain.INSTANCE.tick(server, bot, aggressor)");
         int bridgePreempt = watcher.indexOf("TaskManager.INSTANCE.pauseFor(bot, \"pvp_bot_combat\")");
         int bridgeFallback = watcher.indexOf("pvpAggressors.remove(bot.getUUID());", bridgeAttempt);
@@ -145,11 +148,33 @@ final class CombatHardeningSourceContractTest {
     }
 
     @Test
+    void vanillaAggroMustHaveMossOwnOmnidirectionalPhysicalLineBeforeItCanDispatchCombat() throws IOException {
+        String watcher = read("task/DangerWatcher.java");
+        int aggro = watcher.indexOf("Optional<LivingEntity> aggroTarget = immediateAggressor(bot)");
+        int fallback = watcher.indexOf("if (threat.isEmpty() && aggroTarget.isPresent())", aggro);
+        assertTrue(aggro >= 0 && fallback > aggro);
+        String aggroSelection = watcher.substring(aggro, fallback);
+        assertTrue(aggroSelection.contains(".filter(candidate -> hasOmnidirectionalCombatLine(bot, candidate))"),
+                "a raw Mob target behind terrain must not start local combat or preempt follow");
+
+        int lineCheck = watcher.indexOf("private static boolean hasOmnidirectionalCombatLine");
+        assertTrue(lineCheck > fallback);
+        String helper = watcher.substring(lineCheck, watcher.indexOf("\n    }", lineCheck));
+        assertTrue(helper.contains("CombatCore.hasLineOfSight(bot, aggressor)"),
+                "the gate is Moss's collider ray, not owner vision or perception");
+        assertFalse(helper.contains("canNoticeCreature") || helper.contains("SharedVision")
+                        || helper.contains("look") || helper.contains("facing"),
+                "the combat line must be 360 degrees, with no FOV/facing requirement");
+    }
+
+    @Test
     void pvpBridgeForcesTheAcceptedPlayerTargetSoTheWrapperCanAuthorizeTheStrike() throws IOException {
         String bridge = read("task/PvpBotCombatBrain.java");
         assertTrue(bridge.contains("current.setTarget.invoke(null, name, desiredTarget)"));
         assertTrue(bridge.contains("current.forcedTargetName.get(state)"));
         assertTrue(bridge.contains("Method setTarget = combat.getMethod(\"setTarget\", String.class, String.class)"));
+        assertTrue(bridge.contains("!(aggressor instanceof ServerPlayer)"),
+                "the optional PvP controller must decline mobs so they cannot pause a companion without attacking");
     }
 
     @Test

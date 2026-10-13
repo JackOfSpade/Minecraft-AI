@@ -131,6 +131,41 @@ public final class AIPlayerManagerGameTests {
         context.succeed();
     }
 
+    /** A retained player must return as an owner-visible entity, and remain recallable afterwards. */
+    @GameTest(environment = ENV + "dead_owned_companion_respawns_visibly_and_recall_repairs_it", maxTicks = 40)
+    public void deadOwnedCompanionRespawnsVisiblyAndRecallRepairsIt(GameTestHelper context) {
+        var world = context.getLevel();
+        var server = world.getServer();
+        ServerPlayer owner = MockPlayers.survivalMock(context);
+        UUID ownerId = owner.getUUID();
+        BlockPos ownerFeet = context.absolutePos(new BlockPos(3, 2, 3));
+        BlockPos botFeet = ownerFeet.east(8);
+        prepareLanding(context, ownerFeet);
+        prepareLanding(context, botFeet);
+        owner.teleportTo(world, ownerFeet.getX() + 0.5D, ownerFeet.getY(), ownerFeet.getZ() + 0.5D,
+                java.util.Set.of(), 0.0F, 0.0F, true);
+        // A real client immediately acknowledges its teleport. The harness mock has no client
+        // tick, so move its chunk view explicitly before asking vanilla's tracker to pair Moss.
+        world.getChunkSource().move(owner);
+        String name = name("RespawnRecall", ownerId);
+        GameTestCleanup.whenFinished(context, () -> AIPlayerManager.INSTANCE.despawn(server, name));
+        AIPlayerEntity bot = spawn(context, name, botFeet, ownerId, new ArrayList<>());
+
+        bot.setHealth(0.0F);
+        bot.die(world.damageSources().genericKill());
+        require(context, bot.isDeadOrDying(), "fixture bot did not enter vanilla death state");
+        require(context, AIPlayerManager.INSTANCE.respawnDeadBot(bot, owner), "dead owned companion did not respawn");
+        require(context, bot.isAlive(), "respawned companion is not alive");
+        require(context, isVisibleBesideOwner(bot, owner), "respawned companion is not visibly beside its owner");
+
+        bot.teleportTo(world, botFeet.getX() + 0.5D, botFeet.getY(), botFeet.getZ() + 0.5D,
+                java.util.Set.of(), 0.0F, 0.0F, true);
+        require(context, AIPlayerManager.INSTANCE.recallOwnedCompanion(owner, name),
+                "owner recall rejected a live owned companion");
+        require(context, isVisibleBesideOwner(bot, owner), "recalled companion is not visibly beside its owner");
+        context.succeed();
+    }
+
     private static AIPlayerEntity spawn(GameTestHelper context,
                                         String name,
                                         BlockPos feet,
@@ -146,6 +181,11 @@ public final class AIPlayerManagerGameTests {
 
     private static String name(String prefix, UUID ownerId) {
         return prefix + ownerId.toString().replace("-", "").substring(0, 7);
+    }
+
+    private static boolean isVisibleBesideOwner(AIPlayerEntity bot, ServerPlayer owner) {
+        return bot.isAlive() && bot.level() == owner.level()
+                && bot.distanceToSqr(owner) <= 3.5D * 3.5D && owner.hasLineOfSight(bot);
     }
 
     private static void prepareLanding(GameTestHelper context, BlockPos center) {

@@ -147,8 +147,8 @@ class CreateObsidianSurvivalBoundaryTest {
         assertTrue(task.contains("create_obsidian_search_auto_torch"));
         assertTrue(task.contains("AutomaticLighting.needsUndergroundTorch"),
                 "SEARCH lighting must use the native hostile-spawn darkness rule under a roof");
-        assertTrue(task.contains("AutomaticLighting.tryPlaceDarkestReachable"),
-                "SEARCH lighting must choose the darkest real-player-reachable mount, not a fixed face");
+        assertTrue(task.contains("AutomaticLighting.tryPlaceTorchAtFeet"),
+                "SEARCH lighting must place only on the bot's current floor cell");
         assertTrue(task.contains("create_obsidian_search_lighting_disabled")
                         && task.contains("create_obsidian_search_missing_torch"),
                 "a dark branch must fail closed when physical lighting is unavailable");

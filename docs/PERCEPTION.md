@@ -323,7 +323,7 @@ creature changes: a blow, an arrow or a blast cannot cross what the eyes pass, s
 | Question | Line | Where |
 | --- | --- | --- |
 | Is it noticed? Is it still tracked? What the LLM is told, avoidance routing, a sound matched to a creature, a projectile in view, prey and drops discovered, the owner's nomination | sight (see-through) | `CreatureSenses`, `canNoticeCreature`, `canObserveEntity`, `SharedVision.ownerSees` |
-| Can it be struck or shot? Does it press on the bot? Is it a threat to fight or flee, a target to acquire, a creeper to run from? Is a fight still worth keeping? | physical (the vanilla collider ray) | `CombatCore.hasLineOfSight`, `StrikeLegality`, `DangerWatcher.canReachThreat`, the pressure sets, `nearestTarget`, `nearestHostileAround`, `CreeperDefenseTask`, `EvadeTask`, `HostileBotLedger`'s immediate defensive handoff, the lost-line timers of `CombatTask` and `GuardTask`, `SharedVision.ownerSeesStrict` |
+| Can it be struck or shot? Does it press on the bot? Is it a threat to fight or flee, a target to acquire, a creeper to run from? Is a fight still worth keeping? | physical (the vanilla collider ray) | `CombatCore.hasLineOfSight`, `StrikeLegality`, `DangerWatcher.canReachThreat`, `DangerWatcher.hasOmnidirectionalCombatLine` (the vanilla-aggro bridge; no view cone), `AIPlayerManager`'s post-recall/revive adjacency verification, the pressure sets, `nearestTarget`, `nearestHostileAround`, `CreeperDefenseTask`, `EvadeTask`, `HostileBotLedger`'s immediate defensive handoff, the lost-line timers of `CombatTask` and `GuardTask`, `SharedVision.ownerSeesStrict` |
 | Where did a projectile that hit the bot come from? | physical | `CreatureSenses.traceBack` |
 | May a hand milk, feed, board or trade? | physical, proved before the click | `InteractAction.useItemOnEntity`, `TradeTask` |
 | Which animal, villager or prey does a deliberate search set out for, and from which stand? | sight to nominate, then the physical line of what the click or blow will need | `CombatCore.nearestTarget` (a cow too), `TradeTask.nearestVillager`, `MilkCowAction.nearestCow`, `BreedTask.findPair`, `HuntTask.canStrikeFrom` (per attack pose), the last stand (`DangerWatcher.lastStandTarget`) |
@@ -336,7 +336,8 @@ view (`docs/FINDINGS_DIAMOND64.md` F10, "visible but unreachable"). So every dec
 physical line as well as the notice, written out where it is made and pinned by `SightVersusReachSourceContractTest`:
 target acquisition (`CombatCore.nearestTarget` for a hostile, `nearestHostileAround`, which is the guard's), the hostile-pressure
 sets (`DangerWatcher.observableActiveHostilePressure`, `CombatTask.observableActiveHostiles`), the threat itself
-(`canReachThreat`), a creeper as a risk (`CreeperDefenseTask.observableCreeperSnapshots`) and as an unsettled flight
+(`canReachThreat`), and the vanilla target bridge (`hasOmnidirectionalCombatLine`, a collider ray with no view-cone or facing
+test, so an aggressor behind Moss is valid but one behind terrain is not), a creeper as a risk (`CreeperDefenseTask.observableCreeperSnapshots`) and as an unsettled flight
 (`EvadeTask`), and the two lost-line timers (`CombatTask`, `GuardTask`): they end a fight the bot can never strike in, which is
 about what a blow can cross, so they stay physical and a target seen but never reachable is dropped (and the guard leaves it alone
 for a while) exactly as one seen across a gap always was. The owner's nomination in that bookkeeping is the owner's collider line

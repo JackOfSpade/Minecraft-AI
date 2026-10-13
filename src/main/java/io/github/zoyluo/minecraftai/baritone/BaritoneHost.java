@@ -4,21 +4,23 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.utils.HostEnvironment;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.autosprint.AutoSprintPlayerContext;
 import java.util.function.Supplier;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 
 /**
- * Entry point of the Baritone integration: one {@link IBaritone} per bot.
+ * Entry point of the Baritone integration: one {@link IBaritone} per driven companion or auto-sprinting player.
  *
  * <p>Baritone is vendored pristine (third_party/baritone) and compiled server-only from the patch series in
  * tools/baritone; everything Minecraft-client-shaped that upstream expects is supplied by this package
  * ({@link ServerPlayerContext}, {@link ServerPlayerController}, {@link LoadedChunkSnapshot}) and by the
  * {@code Baritone*Mixin} / {@code ServerChunkCacheBaritoneMixin} classes in the mixin package.</p>
  *
- * <p>Nothing in the mod calls this yet: creating an instance is opt-in, so shipping the integration changes no
- * behavior.</p>
+ * <p>Creation is opt-in. A companion receives its instance only when it starts a route, and a real player only when
+ * they explicitly start auto sprint.</p>
  */
 public final class BaritoneHost {
     private static boolean configured;
@@ -32,12 +34,22 @@ public final class BaritoneHost {
      */
     public static IBaritone create(Supplier<? extends AIPlayerEntity> bot) {
         configure(bot.get().getServer());
-        BaritoneSettings.applyNavLimits();
+        BaritoneSettings.applyNavLimits(bot.get());
         return BaritoneAPI.getProvider().createBaritone(baritone -> new ServerPlayerContext(baritone, bot));
     }
 
     public static IBaritone create(AIPlayerEntity bot) {
         return create(() -> bot);
+    }
+
+    /**
+     * Creates a navigation-only Baritone instance for one real player using the auto-sprint feature.
+     * The context explicitly refuses every edit, item use, and inventory action.
+     */
+    public static IBaritone createAutoSprint(ServerPlayer player) {
+        configure(player.level().getServer());
+        BaritoneSettings.applyNavLimits();
+        return BaritoneAPI.getProvider().createBaritone(baritone -> new AutoSprintPlayerContext(baritone, player));
     }
 
     /** The instance controlling {@code player}, or null if it has none. */

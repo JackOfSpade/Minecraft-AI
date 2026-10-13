@@ -275,7 +275,7 @@ public final class MineTask extends AbstractTask {
                 || bot.getActionPack().hasActiveActions()) {
             return false;
         }
-        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceTorchAtFeet(bot);
         // A temporary owner is not a completed probe. Retrying as soon as it releases avoids a
         // ten-tick dark gap after a shield/use handoff, while NONE/PLACED/FAILED stay paced.
         if (placement != AutomaticLighting.Placement.IN_PROGRESS) {

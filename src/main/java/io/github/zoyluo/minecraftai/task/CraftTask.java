@@ -37,6 +37,11 @@ public final class CraftTask extends AbstractTask {
 
     private final Item target;
     private final int targetCount;
+    /**
+     * A player-facing fulfillment must create an additional carried item. It cannot treat a
+     * nearby workstation (or an old copy in inventory) as an already-satisfied craft.
+     */
+    private final boolean freshOutputRequired;
     private Phase phase = Phase.PLANNING;
     private CraftingHelper.CraftPlan plan;
     private int nextStep;
@@ -77,8 +82,17 @@ public final class CraftTask extends AbstractTask {
     private static final int RECLAIM_TIMEOUT_TICKS = 550;
 
     public CraftTask(Item target, int targetCount) {
+        this(target, targetCount, false);
+    }
+
+    /**
+     * @param freshOutputRequired true only for a declared fresh fulfillment output; ordinary
+     *                            self-use crafting may still reuse an existing workstation.
+     */
+    public CraftTask(Item target, int targetCount, boolean freshOutputRequired) {
         this.target = target;
         this.targetCount = Math.max(1, targetCount);
+        this.freshOutputRequired = freshOutputRequired;
     }
 
     @Override
@@ -135,7 +149,7 @@ public final class CraftTask extends AbstractTask {
         // Idempotent short-circuit: for functional-block targets like a crafting table/furnace, if
         // one is already available nearby (within reach) or already in inventory, complete
         // immediately instead of wasting materials crafting a duplicate.
-        if (utilityAlreadyAvailable(bot)) {
+        if (!freshOutputRequired && utilityAlreadyAvailable(bot)) {
             BotLog.action(bot, "craft_skipped_already_available", "item", BuiltInRegistries.ITEM.getKey(target).toString());
             complete();
             return;

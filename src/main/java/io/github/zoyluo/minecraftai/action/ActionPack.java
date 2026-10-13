@@ -812,7 +812,8 @@ public final class ActionPack {
     /**
      * Follows this bot's verified owner by their live server coordinate, including while they are outside the bot's view. Unlike an
      * ordinary {@link #startApproachTo} request, the owner route may use only a server-captured snapshot of chunks that are already
-     * fully loaded; it never force-loads a chunk, reads Baritone's cache, breaks, places, or crosses water. The navigator repeats
+     * fully loaded; it never force-loads a chunk, reads Baritone's cache, or places blocks. It may break an observed obstruction
+     * or swim through snapshot-proved water. The navigator repeats
      * the UUID/current-position validation immediately before it exposes that snapshot to Baritone.
      */
     public ActionResult startOwnerFollowTo(UUID ownerUuid, BlockPos target, int radius, boolean refresh) {

@@ -452,7 +452,7 @@ public final class StripMineTask extends AbstractTask {
             phase = Phase.MOVE;
             return;
         }
-        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceTorchAtFeet(bot);
         if (placement == AutomaticLighting.Placement.IN_PROGRESS) {
             return;
         }

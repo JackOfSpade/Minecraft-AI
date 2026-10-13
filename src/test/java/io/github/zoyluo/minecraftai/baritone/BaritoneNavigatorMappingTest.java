@@ -287,12 +287,12 @@ final class BaritoneNavigatorMappingTest {
     }
 
     @Test
-    void ownerFollowIsOwnerBoundWalkOnlyAndCannotFallThroughToBaritoneCache() throws IOException {
+    void ownerFollowIsOwnerBoundBreakAndSwimAndCannotFallThroughToBaritoneCache() throws IOException {
         NavRoute ownerRoute = NavRoute.ownerFollow(java.util.UUID.randomUUID(), new net.minecraft.core.BlockPos(40, 64, 0),
                 3, "owner_follow", 0);
         assertEquals(NavRoute.Shape.OWNER_FOLLOW, ownerRoute.shape());
-        assertEquals(NavRoute.Options.WALK_ONLY, ownerRoute.options(),
-                "the only direct-coordinate shape is dry walking with no breaking or placing");
+        assertEquals(NavRoute.Options.BREAK_AND_SWIM, ownerRoute.options(),
+                "the only direct-coordinate shape may break observed obstructions and cross water, but cannot place");
         assertTrue(ownerRoute.ownerUuid() != null);
 
         String pack = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/action/ActionPack.java"));
@@ -308,10 +308,11 @@ final class BaritoneNavigatorMappingTest {
                 "the navigator repeats the owner check at the mutation boundary");
         String guard = method(navigator, "private static boolean isAuthorizedOwnerFollow(");
         assertTrue(guard.contains("route.ownerUuid() == null")
-                        && guard.contains("route.options().allowBreak() || route.options().allowPlace()")
-                        && guard.contains("route.options().allowWater()")
+                        && !guard.contains("route.options().allowBreak()")
+                        && guard.contains("route.options().allowPlace()")
+                        && !guard.contains("route.options().allowWater()")
                         && guard.contains("owner.blockPosition().equals(route.target())"),
-                "a direct goal must be this bot's current owner's current cell and remain walk-only");
+                "a direct goal must be this bot's current owner's current cell, may break and swim, and cannot place");
         String principal = method(navigator, "private static boolean isCurrentOwnerFollow(");
         assertTrue(principal.contains("currentOwnerFollowTarget(bot, route) != null"),
                 "a running owner route must retain its owner/dimension authority without treating ordinary movement as revocation");
@@ -344,6 +345,12 @@ final class BaritoneNavigatorMappingTest {
                         && stateAt.contains("if (!hasCell(x, y, z))")
                         && stateAt.contains("if (!(access instanceof LevelChunk chunk) || chunk.isEmpty())"),
                 "the loaded-cell predicate and state lookup agree: an empty/missing chunk cannot reopen a provider read");
+    }
+
+    @Test
+    void ownerFollowAcceptsOnlyFallsThatCannotDealVanillaDamage() {
+        assertEquals(0, io.github.zoyluo.minecraftai.action.FallSafety.fallDamage(3));
+        assertEquals(1, io.github.zoyluo.minecraftai.action.FallSafety.fallDamage(4));
     }
 
     @Test
@@ -422,11 +429,12 @@ final class BaritoneNavigatorMappingTest {
                         && click.contains("pillar_destination_outside_column"),
                 "the placement interceptor must reject bridge/side placements outside an explicit pillar column");
         String safety = method(navigator, "static String observedPathSafetyFailure(");
-        assertTrue(safety.contains("ownerFollow && movement instanceof MovementFall")
+        assertTrue(safety.contains("ownerFollow && movement instanceof MovementFall && !FallSafety.isNonLethal(bot, fallBlocks)")
                         && safety.contains("navigation_owner_follow_fall_refused")
-                        && safety.contains("movement.getSrc().getY() - movement.getDest().getY() > safeFall")
+                        && safety.contains("int fallBlocks = movement.getSrc().getY() - movement.getDest().getY()")
+                        && safety.contains("fallBlocks > safeFall")
                         && safety.contains("navigation_observed_corridor_unavailable"),
-                "owner follow must refuse Baritone fall movements, while other dry routes still obey maxSafeFall and no-place completion before execution");
+                "owner follow must reject only damaging Baritone falls, while every dry route still obeys maxSafeFall and no-place completion before execution");
         String observedHostiles = method(navigator, "private static int observedHostileCount(");
         assertTrue(observedHostiles.contains("baritone.getPlayerContext().entities()")
                         && observedHostiles.contains("entity instanceof Mob mob && mob instanceof Enemy && mob.isAlive()")

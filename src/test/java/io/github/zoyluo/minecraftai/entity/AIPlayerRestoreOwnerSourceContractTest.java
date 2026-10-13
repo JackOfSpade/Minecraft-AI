@@ -16,7 +16,7 @@ final class AIPlayerRestoreOwnerSourceContractTest {
         int stateRestore = manager.indexOf("BotPersistence.applyStoredPlayerState(bot, record);", spawn);
         int towerRestore = manager.indexOf("BotPersistence.restoreTower(bot, record);", stateRestore);
         int ownerLookup = manager.indexOf("Optional<ServerPlayer> owner = onlineOwner(server, record);", towerRestore);
-        int relocation = manager.indexOf("bot.teleportTo(anchor.level()", ownerLookup);
+        int relocation = manager.indexOf("teleportCompanionBesideOwner(bot, anchor)", ownerLookup);
 
         assertTrue(spawn >= 0);
         assertTrue(stateRestore > spawn);
@@ -25,6 +25,8 @@ final class AIPlayerRestoreOwnerSourceContractTest {
         assertTrue(relocation > ownerLookup);
         assertTrue(manager.contains("new Vec3(record.x(), record.y(), record.z())"));
         assertTrue(manager.contains("\"_then_owner_nearby\""));
+        assertTrue(manager.contains("owner.hasLineOfSight(bot)"),
+                "owner restore relocation must be visibly adjacent, not merely a teleport acknowledgement");
         assertTrue(manager.contains("\"restore_strategy\", restoreStrategy"));
     }
 }

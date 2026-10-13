@@ -133,6 +133,63 @@ public final class FollowSwimGameTests {
         });
     }
 
+    /**
+     * A river current can displace a swimmer sideways or backwards between input ticks. Follow
+     * must retain its already-proved stroke while the displaced body remains in adjacent observed
+     * water, rather than cancelling it through the generic continuation guard and eventually
+     * surfacing in place.
+     */
+    @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_bot_crosses_pond_against_river_current", maxTicks = 1600)
+    public void botCrossesPondAgainstRiverCurrent(GameTestHelper context) {
+        Pond pond = buildPond(context, 8, 23, 3, 30);
+        ServerLevel world = context.getLevel();
+        AIPlayerEntity bot = spawnBot(world, "CurrentSwimBot", pond.feet().offset(3, 0, LANE_Z));
+        AIPlayerEntity target = spawnBot(world, "CurrentSwimTgt", pond.feet().offset(9, 0, LANE_Z));
+        holdStill(target);
+        swimTo(world, pond, target, 9.5D, LANE_Z + 0.5D, SWIM_Y);
+        FollowTask follow = new FollowTask("CurrentSwimTgt");
+        TaskManager.INSTANCE.assign(bot, follow,
+                TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_follow_swim_current"));
+
+        double[] targetX = {9.5D};
+        boolean[] sawWater = {false};
+        boolean[] sawCurrent = {false};
+        AtomicInteger tick = new AtomicInteger();
+        context.failIfEver(() -> {
+            int now = tick.incrementAndGet();
+            requireRunning(context, follow, bot);
+            sawWater[0] |= bot.isInWater();
+            if (bot.isInWater()) {
+                // Deterministic analogue of an opposing river current: it is a physical velocity
+                // only in the test fixture, never a production movement shortcut.
+                Vec3 velocity = bot.getDeltaMovement();
+                bot.setDeltaMovement(velocity.x - 0.045D, velocity.y, velocity.z);
+                sawCurrent[0] = true;
+            }
+            require(context, bot.getAirSupply() > FollowOxygen.RESCUE_AIR,
+                    "the current crossing spent the emergency air reserve at tick " + now
+                            + ": air=" + bot.getAirSupply());
+            require(context, bot.getVehicle() == null && noBoats(world, pond),
+                    "current follow used a boat instead of swimming");
+
+            if (now > 40 && targetX[0] < 24.0D) {
+                targetX[0] += 0.10D;
+                swimTo(world, pond, target, targetX[0], LANE_Z + 0.5D, SWIM_Y);
+            } else if (targetX[0] >= 24.0D) {
+                standOn(world, pond, target, 26.5D, LANE_Z + 0.5D, 0.0D);
+            } else {
+                swimTo(world, pond, target, 9.5D, LANE_Z + 0.5D, SWIM_Y);
+            }
+
+            if (targetX[0] >= 24.0D && now > 180 && !bot.isInWater()
+                    && bot.getX() >= pond.feet().getX() + 23.5D && bot.distanceTo(target) <= 5.0D) {
+                require(context, sawWater[0] && sawCurrent[0],
+                        "the fixture did not make the follower swim against the current");
+                finish(context, pond, bot, target);
+            }
+        });
+    }
+
     @GameTest(environment = "minecraftai-gametest:follow_swim_game_tests_dives_after_target_resurfaces_before_drowning_then_goes_back_down", maxTicks = 1500)
     public void divesAfterTargetResurfacesBeforeDrowningThenGoesBackDown(GameTestHelper context) {
         runDive(context, false, "DiveBot", "DiveTgt");

@@ -4,10 +4,12 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BuildAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
+import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenHandler;
 import io.github.zoyluo.minecraftai.log.BotLog;
-import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LightLayer;
@@ -23,12 +25,15 @@ import net.minecraft.world.level.LightLayer;
  */
 final class AutomaticLighting {
 
+    /** A steady one-second cadence keeps the background check bounded and replayable. */
+    private static final int PASSIVE_CHECK_INTERVAL_TICKS = 20;
+
     enum Placement {
         /** No torch was needed, available, or safely reachable this tick. */
         NONE,
         /** A shield or another temporary use-owner must finish before retrying. */
         IN_PROGRESS,
-        /** Vanilla confirmed that a torch was placed at the selected darkest cell. */
+        /** Vanilla confirmed that a torch was placed at the bot's current floor cell. */
         PLACED,
         /** The candidate was valid when chosen, but vanilla declined the placement. */
         FAILED
@@ -62,7 +67,35 @@ final class AutomaticLighting {
         // The native light read is constant-time while the roof test deliberately walks a
         // vertical column.  Bright locations are overwhelmingly common on the surface, so reject
         // them first without changing the underground-only policy.
-        return isPotentialHostileSpawnDark(world, pos) && !SurfaceCheck.isOnSurface(world, pos);
+        if (!isPotentialHostileSpawnDark(world, pos)) {
+            return false;
+        }
+        // The Nether has no sky: its bedrock ceiling would classify every open lava sea and
+        // cavern as underground. Light only genuinely enclosed passages there, where a torch
+        // reduces an actual spawn risk without decorating open terrain or wasting the reserve.
+        // The End has no comparable roof, so its open islands naturally take the regular
+        // surface path below; enclosed End-city rooms and caves still have a real local roof.
+        return world.dimension() == Level.NETHER
+                ? isEnclosedNetherSpace(world, pos)
+                : !SurfaceCheck.isOnSurface(world, pos);
+    }
+
+    /** A Nether cave/corridor has a nearby solid ceiling and at least one solid side wall. */
+    private static boolean isEnclosedNetherSpace(Level world, BlockPos pos) {
+        boolean ceiling = false;
+        for (int dy = 1; dy <= 6; dy++) {
+            if (!world.getBlockState(pos.above(dy)).getCollisionShape(world, pos.above(dy)).isEmpty()) {
+                ceiling = true;
+                break;
+            }
+        }
+        if (!ceiling) {
+            return false;
+        }
+        return !world.getBlockState(pos.north()).getCollisionShape(world, pos.north()).isEmpty()
+                || !world.getBlockState(pos.south()).getCollisionShape(world, pos.south()).isEmpty()
+                || !world.getBlockState(pos.east()).getCollisionShape(world, pos.east()).isEmpty()
+                || !world.getBlockState(pos.west()).getCollisionShape(world, pos.west()).isEmpty();
     }
 
     /**
@@ -74,17 +107,12 @@ final class AutomaticLighting {
     }
 
     /**
-     * Places one torch for an actively mining/exploring bot without taking over its route or
-     * moving it away from an ore drop.  "Reachable" here has the strict real-player meaning:
-     * {@link BuildAction#canAcceptPlacementAt} has ray-proven a support face inside vanilla
-     * interaction range.  It never starts a path, digs, or pillars merely to light an area.
-     *
-     * <p>The scan is deliberately small because this runs inside active tasks.  It only considers
-     * observable floor cells that the bot can place on right now, excludes every open-sky/canopy
-     * cell, and picks lowest raw light (nearest as a stable tie-break).  This makes the automatic
-     * action useful without violating a mining task's pickup and movement ownership.</p>
+     * Places one torch in the bot's own floor cell for an actively mining/exploring bot. It never
+     * scans neighbouring cells, starts a path, digs, or pillars. The exact target still needs a
+     * ray-proven vanilla support face through {@link BuildAction#canAcceptPlacementAt}; when that
+     * proof fails, the automation simply defers instead of changing the task's movement.
      */
-    static Placement tryPlaceDarkestReachable(AIPlayerEntity bot) {
+    static Placement tryPlaceTorchAtFeet(AIPlayerEntity bot) {
         // Choosing a hotbar slot is itself a player action.  In particular it can interrupt a
         // bow/food use before BuildAction gets the chance to report that the hand is busy, so
         // defer before touching inventory rather than only relying on BuildAction's shield guard.
@@ -99,76 +127,139 @@ final class AutomaticLighting {
         if (!needsUndergroundTorch(world, feet)) {
             return Placement.NONE;
         }
-        BlockPos target = darkestReachableFloor(bot);
-        if (target == null) {
+        if (!world.getBlockState(feet).isAir() || !BuildAction.canAcceptPlacementAt(bot, feet)) {
             return Placement.NONE;
         }
         int torchSlot = InventoryAction.findItem(bot, Items.TORCH).orElse(-1);
         if (torchSlot < 0 || InventoryAction.equipFromSlot(bot, torchSlot) < 0) {
             return Placement.FAILED;
         }
-        ActionResult placed = BuildAction.placeBlockAt(bot, target);
+        ActionResult placed = BuildAction.placeBlockAt(bot, feet);
         if (placed.isInProgress()) {
             return Placement.IN_PROGRESS;
         }
         if (placed.isSuccess()) {
             BotLog.action(bot, "auto_torch",
-                    "pos", target.toShortString(),
-                    "raw_light", rawBrightness(world, target),
-                    "block_light", world.getBrightness(LightLayer.BLOCK, target));
+                    "pos", feet.toShortString(),
+                    "raw_light", rawBrightness(world, feet),
+                    "block_light", world.getBrightness(LightLayer.BLOCK, feet));
             return Placement.PLACED;
         }
         return Placement.FAILED;
     }
 
-    /** Package-visible for focused tests and the automatic area-light task's safety reasoning. */
-    static BlockPos darkestReachableFloor(AIPlayerEntity bot) {
-        Level world = bot.level();
-        BlockPos feet = bot.blockPosition();
-        // A lower cave ledge or an upper shelf can still be inside the same vanilla interaction
-        // range.  Scan the full interaction-sized cube and let the exact ray/reach proof below
-        // discard positions outside the real reachable volume; a fixed +/-1 Y window silently
-        // missed valid darkest mounts.
-        int radius = Math.max(1, (int) Math.ceil(bot.blockInteractionRange()));
-        BlockPos best = null;
-        int bestRaw = Integer.MAX_VALUE;
-        int bestBlock = Integer.MAX_VALUE;
-        long bestDistance = Long.MAX_VALUE;
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dy = -radius; dy <= radius; dy++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    BlockPos candidate = feet.offset(dx, dy, dz).immutable();
-                    if (!isReachableDarkFloor(bot, candidate)) {
-                        continue;
-                    }
-                    int raw = rawBrightness(world, candidate);
-                    int block = world.getBrightness(LightLayer.BLOCK, candidate);
-                    long xDistance = candidate.getX() - feet.getX();
-                    long yDistance = candidate.getY() - feet.getY();
-                    long zDistance = candidate.getZ() - feet.getZ();
-                    long distance = xDistance * xDistance + yDistance * yDistance + zDistance * zDistance;
-                    if (raw < bestRaw
-                            || raw == bestRaw && block < bestBlock
-                            || raw == bestRaw && block == bestBlock && distance < bestDistance) {
-                        best = candidate;
-                        bestRaw = raw;
-                        bestBlock = block;
-                        bestDistance = distance;
-                    }
-                }
-            }
+    /**
+     * Opportunistically lights an already-reachable underground floor while another task keeps
+     * its route. This never starts a route, cancels one, digs, pillars, or pauses the task. It
+     * also refuses to take over an in-flight local walk, step, mining action, inventory screen,
+     * or held-item use. The selected hotbar slot and look direction are restored before the
+     * task/control layer sees the next tick.
+     *
+     * <p>Unlike {@link #tryPlaceTorchAtFeet(AIPlayerEntity)}, the passive form restores an
+     * exact full-hotbar swap before it returns. It can therefore use a carried main-inventory
+     * torch without leaving a task's selected tool displaced; offhand promotion remains excluded
+     * because that changes a second equipment owner.</p>
+     */
+    static Placement tryPlaceTorchAtFeetPassively(AIPlayerEntity bot, int serverTick) {
+        if (Math.floorMod(serverTick, PASSIVE_CHECK_INTERVAL_TICKS) != 0) {
+            return Placement.NONE;
         }
-        return best;
+        return tryPlaceTorchAtFeetPassively(bot);
     }
 
-    private static boolean isReachableDarkFloor(AIPlayerEntity bot, BlockPos pos) {
+    /** Performs the same non-interrupting probe immediately for a detected dark-trap safety event. */
+    static Placement tryPlaceTorchAtFeetPassively(AIPlayerEntity bot) {
+        if (!MinecraftAiConfig.get().night().autoLight()
+                || !canLightWithoutInterrupting(bot)
+                || InventoryAction.countItem(bot, Items.TORCH) <= 0) {
+            return Placement.NONE;
+        }
         Level world = bot.level();
-        return ObservableWorldQuery.canObserveCell(bot, pos)
-                && ObservableWorldQuery.canObserveCollider(bot, pos.below())
-                && world.getBlockState(pos).isAir()
-                && !world.getBlockState(pos.below()).getCollisionShape(world, pos.below()).isEmpty()
-                && isPotentialHostileSpawnDark(world, pos)
-                && !SurfaceCheck.isOnSurface(world, pos)
-                && BuildAction.canAcceptPlacementAt(bot, pos);
+        BlockPos feet = bot.blockPosition();
+        if (!needsUndergroundTorch(world, feet)) {
+            return Placement.NONE;
+        }
+        if (!world.getBlockState(feet).isAir() || !BuildAction.canAcceptPlacementAt(bot, feet)) {
+            return Placement.NONE;
+        }
+        int torchSlot = passiveTorchSourceSlot(bot);
+        if (torchSlot < 0) {
+            return Placement.NONE;
+        }
+
+        Inventory inventory = bot.getInventory();
+        int selectedSlot = inventory.getSelectedSlot();
+        float yaw = bot.getYRot();
+        float pitch = bot.getXRot();
+        boolean restoreInventorySwap = !Inventory.isHotbarSlot(torchSlot);
+        int equippedSlot = -1;
+        try {
+            equippedSlot = InventoryAction.equipFromSlot(bot, torchSlot);
+            if (equippedSlot < 0) {
+                return Placement.FAILED;
+            }
+            ActionResult placed = BuildAction.placeBlockAt(bot, feet);
+            if (placed.isInProgress()) {
+                return Placement.IN_PROGRESS;
+            }
+            if (!placed.isSuccess()) {
+                return Placement.FAILED;
+            }
+            BotLog.action(bot, "passive_auto_torch",
+                    "pos", feet.toShortString(),
+                    "raw_light", rawBrightness(world, feet),
+                    "block_light", world.getBrightness(LightLayer.BLOCK, feet));
+            return Placement.PLACED;
+        } finally {
+            // BuildAction must turn to the support face to use vanilla interaction. Give the
+            // route and its task their exact inventory, slot, and aim back before their next tick.
+            // equipFromSlot exchanges a main-inventory source with a hotbar destination; reversing
+            // that exchange puts the remaining torch stack back in its source after vanilla has
+            // consumed one, even when the hotbar had no empty slot.
+            if (restoreInventorySwap && equippedSlot >= 0) {
+                var sourceStack = inventory.getNonEquipmentItems().get(torchSlot);
+                var equippedStack = inventory.getNonEquipmentItems().get(equippedSlot);
+                inventory.getNonEquipmentItems().set(torchSlot, equippedStack);
+                inventory.getNonEquipmentItems().set(equippedSlot, sourceStack);
+            }
+            inventory.setSelectedSlot(selectedSlot);
+            inventory.setChanged();
+            LookAction.setYawPitch(bot, yaw, pitch);
+        }
     }
+
+    private static boolean canLightWithoutInterrupting(AIPlayerEntity bot) {
+        if (bot.isUsingItem()
+                || ShieldGuard.holdsShield(bot)
+                || BotInventoryScreenHandler.isScreenOpen(bot)) {
+            return false;
+        }
+        var actions = bot.getActionPack();
+        if (!actions.isWalkToIdle() || !actions.isMiningIdle() || !actions.stepIdle()) {
+            return false;
+        }
+        // A Baritone route is explicitly allowed: the placement is in interaction range and does
+        // not stop or replace it. A completely idle action pack is allowed too, so a quiet task
+        // boundary can light its own cave without spawning a separate light_area task.
+        return !actions.isPathExecutorIdle() || !actions.hasActiveActions();
+    }
+
+    /** Returns a non-disruptive torch source for passive lighting, or {@code -1} if none exists. */
+    private static int passiveTorchSourceSlot(AIPlayerEntity bot) {
+        Inventory inventory = bot.getInventory();
+        for (int slot = 0; slot <= 8; slot++) {
+            if (inventory.getNonEquipmentItems().get(slot).is(Items.TORCH)) {
+                return slot;
+            }
+        }
+        // A main-inventory source is safe even with a full hotbar: the caller reverses the exact
+        // equipFromSlot swap in its finally block, so the task's selected tool returns unchanged.
+        for (int slot = 9; slot < inventory.getNonEquipmentItems().size(); slot++) {
+            if (inventory.getNonEquipmentItems().get(slot).is(Items.TORCH)) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
 }

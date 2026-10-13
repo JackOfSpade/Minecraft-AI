@@ -9,6 +9,8 @@ import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.inventory.BotInventoryScreenFactory;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import io.github.zoyluo.minecraftai.mixin.ChunkMapEntityTrackerInvokerMixin;
+import io.github.zoyluo.minecraftai.mixin.ChunkMapEntityTrackersAccessorMixin;
 import io.github.zoyluo.minecraftai.mixin.ChunkMapPlayerStatusInvokerMixin;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavigationControllerOwner;
@@ -304,12 +306,45 @@ public class AIPlayerEntity extends ServerPlayer {
         if (this.connection == null || this.isRemoved()) {
             return;
         }
+        var nativeChunkMap = this.level().getChunkSource().chunkMap;
+        boolean hadTracker = ((ChunkMapEntityTrackersAccessorMixin) (Object) nativeChunkMap)
+                .minecraftai$getEntityTrackers()
+                .containsKey(this.getId());
         ChunkMapPlayerStatusInvokerMixin chunkMap =
-                (ChunkMapPlayerStatusInvokerMixin) (Object) this.level().getChunkSource().chunkMap;
+                (ChunkMapPlayerStatusInvokerMixin) (Object) nativeChunkMap;
         chunkMap.minecraftai$updatePlayerStatus(this, false);
-        chunkMap.minecraftai$updatePlayerStatus(this, true);
+        boolean tracked = ensureMinecraftAiEntityTracked();
+        // addEntity restores player status itself when death removed the entity tracker. If the
+        // tracker survived, restore the player subscription explicitly after the reset above.
+        if (tracked && hadTracker) {
+            chunkMap.minecraftai$updatePlayerStatus(this, true);
+        }
         this.chunkTrackingSuspendedForRespawn = false;
-        settleChunkTracking();
+        if (tracked) {
+            settleChunkTracking();
+        }
+    }
+
+    /**
+     * Makes a retained fake player visible to vanilla's entity tracker again after death.
+     *
+     * <p>{@code updatePlayerStatus} restores only the fake player's chunk subscriptions. It does
+     * not recreate the {@code ChunkMap.TrackedEntity} removed with the dead player, so an owner
+     * could stand next to the revived companion while both recall and the normal client pairing
+     * found no tracker. This intentionally leaves an existing tracker alone, which lets recall
+     * repair companions left behind by an older release without churning their chunk tickets.</p>
+     */
+    public boolean ensureMinecraftAiEntityTracked() {
+        if (this.connection == null || this.isRemoved()) {
+            return false;
+        }
+        var chunkMap = this.level().getChunkSource().chunkMap;
+        var trackers = ((ChunkMapEntityTrackersAccessorMixin) (Object) chunkMap)
+                .minecraftai$getEntityTrackers();
+        if (!trackers.containsKey(this.getId())) {
+            ((ChunkMapEntityTrackerInvokerMixin) (Object) chunkMap).minecraftai$addEntity(this);
+        }
+        return trackers.containsKey(this.getId());
     }
 
     /**

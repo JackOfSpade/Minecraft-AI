@@ -14,7 +14,8 @@ import net.minecraft.core.BlockPos;
  * {@link Shape#DIRECTIONAL_PURSUIT} keeps an unobserved remote coordinate only as a heading: admission chooses a nearby,
  * observed stance as its actual {@code GoalBlock} and never makes the remote terrain part of the route. {@link Shape#OWNER_FOLLOW}
  * is the one deliberate exception: it may route toward the live coordinate of the bot's verified owner over a snapshot of currently
- * loaded chunks, but it is always walk-only and cannot name an arbitrary coordinate as an unrestricted goal.</p>
+ * loaded chunks. It may break an observed obstruction and swim to reach that verified owner, but cannot place blocks,
+ * or name an arbitrary coordinate as an unrestricted goal.</p>
  */
 public final class NavRoute {
     public enum Shape {
@@ -71,6 +72,10 @@ public final class NavRoute {
 
         /** Walk, climb and open doors only, on dry ground. */
         public static final Options WALK_ONLY = new Options(false, false, false, false);
+        /** Break an obstructing block when necessary, but never place blocks or enter water. */
+        public static final Options BREAK_ONLY = new Options(true, false, false, false);
+        /** Break an observed obstruction or cross water, but never place blocks. */
+        public static final Options BREAK_AND_SWIM = new Options(true, false, true, false);
         /** Water crossing allowed, no breaking or placing, while resolving an ordinary observed dry stance at the destination. */
         public static final Options SWIM = new Options(false, false, true, false);
         /** An internal/exact-water form for a route whose destination itself is an observed water or shore cell. */
@@ -147,7 +152,7 @@ public final class NavRoute {
         if (ownerUuid == null) {
             throw new IllegalArgumentException("ownerUuid is required for owner follow");
         }
-        return new NavRoute(Shape.OWNER_FOLLOW, target, radius, Options.WALK_ONLY, label, startTick,
+        return new NavRoute(Shape.OWNER_FOLLOW, target, radius, Options.BREAK_AND_SWIM, label, startTick,
                 Integer.MIN_VALUE, null, ownerUuid);
     }
 

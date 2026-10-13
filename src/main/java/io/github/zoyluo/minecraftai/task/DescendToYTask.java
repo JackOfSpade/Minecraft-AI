@@ -3027,7 +3027,7 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
                 || bot.getActionPack().hasActiveActions()) {
             return false;
         }
-        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceTorchAtFeet(bot);
         // A use-owner can appear between the guard above and BuildAction. Preserve the immediate
         // retry when it clears instead of treating that deferral as a completed ten-tick probe.
         if (placement != AutomaticLighting.Placement.IN_PROGRESS) {

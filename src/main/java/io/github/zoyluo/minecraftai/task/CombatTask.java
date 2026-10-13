@@ -3,7 +3,6 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.BuildAction;
-import io.github.zoyluo.minecraftai.action.EatAction;
 import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
@@ -26,6 +25,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 public final class CombatTask extends AbstractTask {
     private enum Phase {
@@ -49,6 +49,12 @@ public final class CombatTask extends AbstractTask {
     private static final double RANGED_MELEE_SWITCH_DISTANCE = CombatCore.ATTACK_RANGE * 1.5D;
     private static final int BLOCK_TICKS = 12;
     private static final int HEAL_WAIT_TICKS = 200;
+    /** Throw a carried Instant Health bottle once at least five hearts are missing; any potion tier is valid. */
+    private static final float COMBAT_SPLASH_HEAL_MISSING_HEALTH = 10.0F;
+    /** Vanilla splash effects reach four blocks from the impact. Do not also heal a nearby hostile. */
+    private static final double COMBAT_SPLASH_HEAL_ENEMY_CLEARANCE = 4.0D;
+    /** A failed throw/equip must not consume every combat tick retrying the exact same inventory action. */
+    private static final int COMBAT_SPLASH_RETRY_TICKS = 20;
     private static final double HEAL_SAFE_DISTANCE = CombatCore.ATTACK_RANGE + 2.0D;
     // Vanilla Creeper ignition only backs off beyond seven blocks (or after LOS is broken).
     private static final double CREEPER_HEAL_SAFE_DISTANCE = 8.0D;
@@ -84,7 +90,9 @@ public final class CombatTask extends AbstractTask {
     private int repositionTicks;
     private int blockTicks;
     private int healTicks;
-    private boolean eating;
+    /** The only healing primitive allowed while this combat task owns the controls: a thrown Instant Health bottle. */
+    private HealingPotionTask combatSplashPotionTask;
+    private int nextCombatSplashAttemptElapsed;
     /** Owns only the temporary arrow/offhand swap for one bow engagement. */
     private EquipAction.RangedLoadout rangedLoadout;
     /** Transient safety pressure; never owns primary kill credit. */
@@ -188,6 +196,8 @@ public final class CombatTask extends AbstractTask {
         blockedShotTicks = 0;
         sightBlockedPeeks = 0;
         mountBlockedTicks = 0;
+        combatSplashPotionTask = null;
+        nextCombatSplashAttemptElapsed = 0;
     }
 
     /**
@@ -249,6 +259,9 @@ public final class CombatTask extends AbstractTask {
             if (state == TaskState.RUNNING && phase == Phase.RETREAT) {
                 retreat(bot);
             }
+            return;
+        }
+        if (tickCombatSplashHealing(bot)) {
             return;
         }
         if (!defensiveEngagementAllowed(bot)) {
@@ -334,9 +347,9 @@ public final class CombatTask extends AbstractTask {
         return phase == Phase.BLOCK && state == TaskState.RUNNING;
     }
 
-    /** True while the fight is healing (HEAL: eating between bites counts for the shield's hand policy). */
+    /** True while the fight is recovering; no shield may steal the use hand from the thrown bottle. */
     boolean healing() {
-        return phase == Phase.HEAL && state == TaskState.RUNNING;
+        return state == TaskState.RUNNING && (phase == Phase.HEAL || combatSplashPotionTask != null);
     }
 
     /**
@@ -684,7 +697,6 @@ public final class CombatTask extends AbstractTask {
             retreatThreat = null;
             retreatDestination = null;
             healTicks = 0;
-            eating = false;
             if (kills >= targetKills) {
                 complete();
             } else {
@@ -699,7 +711,6 @@ public final class CombatTask extends AbstractTask {
             retreatThreat = null;
             retreatDestination = null;
             healTicks = 0;
-            eating = false;
             if (kills >= targetKills) {
                 complete();
             } else {
@@ -737,8 +748,8 @@ public final class CombatTask extends AbstractTask {
                 if (!meleeForbidden && distance <= CombatCore.ATTACK_RANGE) {
                     return;
                 }
-                // A ranged attacker with clear sight can still damage a bot that settles to
-                // eat. Keep the defensive owner in RETREAT while that sight line remains even
+                // A ranged attacker with clear sight can still damage a bot that pauses to
+                // recover. Keep the defensive owner in RETREAT while that sight line remains even
                 // when this constrained space offers no factual escape hop.
                 if (CombatCore.isRangedThreat(threat) && CombatCore.hasLineOfSight(bot, threat)) {
                     return;
@@ -751,7 +762,6 @@ public final class CombatTask extends AbstractTask {
     private void beginRetreat(AIPlayerEntity bot) {
         finishRangedLoadout(bot);
         bot.stopUsingItem();
-        eating = false;
         healTicks = 0;
         retreatDestination = null;
         phase = Phase.RETREAT;
@@ -766,26 +776,79 @@ public final class CombatTask extends AbstractTask {
             return;
         }
         boolean fullHealth = bot.getHealth() >= bot.getMaxHealth();
-        boolean fullHunger = bot.getFoodData().getFoodLevel() >= 20;
-        if (fullHealth && fullHunger) {
+        if (fullHealth) {
             bot.getActionPack().stopAll();
-            eating = false;
             phase = Phase.ACQUIRE;
             return;
-        }
-        if (!eating && !fullHunger && InventoryAction.hasFood(bot)) {
-            bot.getActionPack().stopAll();
-            ActionResult result = EatAction.startEating(bot);
-            eating = !result.isFailed();
-            return;
-        }
-        if (eating && !bot.isUsingItem() && healTicks > 20) {
-            eating = false;
         }
         if (healTicks > HEAL_WAIT_TICKS) {
             bot.getActionPack().stopAll();
             phase = bot.getHealth() > retreatHpThreshold ? Phase.ACQUIRE : Phase.RETREAT;
         }
+    }
+
+    /**
+     * A splash Instant Health potion is fast enough to use in a live fight; food and a drinkable
+     * bottle are deliberately not. They belong to the post-fight shelter recovery where their use
+     * time cannot leave the bot exposed.
+     */
+    private boolean tickCombatSplashHealing(AIPlayerEntity bot) {
+        if (combatSplashPotionTask == null) {
+            if (elapsed < nextCombatSplashAttemptElapsed
+                    || !shouldUseCombatSplashHealing(bot.getHealth(), bot.getMaxHealth())
+                    || !HealingPotionTask.hasSplashHealingPotion(bot)
+                    || hostileWithinCombatSplashHealingRange(bot)) {
+                return false;
+            }
+            finishRangedLoadout(bot);
+            ShieldGuard.lowerIfOwner(bot, ShieldGuard.Owner.TASK);
+            bot.getActionPack().stopAll();
+            combatSplashPotionTask = HealingPotionTask.splashOnlyForCombat();
+            combatSplashPotionTask.start(bot);
+        }
+        combatSplashPotionTask.tick(bot);
+        if (combatSplashPotionTask.state() == TaskState.RUNNING) {
+            return true;
+        }
+        if (combatSplashPotionTask.state() == TaskState.FAILED) {
+            BotLog.action(bot, "combat_splash_healing_failed",
+                    "reason", combatSplashPotionTask.failureReason());
+            nextCombatSplashAttemptElapsed = elapsed + COMBAT_SPLASH_RETRY_TICKS;
+        }
+        combatSplashPotionTask = null;
+        return true;
+    }
+
+    static boolean shouldUseCombatSplashHealing(float health, float maxHealth) {
+        return health > 0.0F && maxHealth > 0.0F
+                && health <= maxHealth - COMBAT_SPLASH_HEAL_MISSING_HEALTH;
+    }
+
+    /**
+     * The bottle is aimed at the floor at the bot's feet. A hostile in the splash-effect radius
+     * would receive Instant Health too, so keep the fast self-heal for a clear pocket of space.
+     * The distance is from the intended impact point to the nearest point of the hostile's body,
+     * rather than its feet, so tall or wide enemies cannot slip into the check.
+     */
+    private static boolean hostileWithinCombatSplashHealingRange(AIPlayerEntity bot) {
+        Vec3 impact = Vec3.atCenterOf(bot.blockPosition()).add(0.0D, 0.05D, 0.0D);
+        double radiusSquared = COMBAT_SPLASH_HEAL_ENEMY_CLEARANCE * COMBAT_SPLASH_HEAL_ENEMY_CLEARANCE;
+        return bot.level().getEntitiesOfClass(LivingEntity.class,
+                        bot.getBoundingBox().inflate(COMBAT_SPLASH_HEAL_ENEMY_CLEARANCE),
+                        entity -> entity != bot && entity.isAlive() && CombatCore.hostileTo(bot, entity))
+                .stream()
+                .anyMatch(entity -> distanceSquaredToBounds(impact, entity.getBoundingBox())
+                        <= radiusSquared);
+    }
+
+    private static double distanceSquaredToBounds(Vec3 point, AABB bounds) {
+        double x = Math.max(bounds.minX, Math.min(point.x, bounds.maxX));
+        double y = Math.max(bounds.minY, Math.min(point.y, bounds.maxY));
+        double z = Math.max(bounds.minZ, Math.min(point.z, bounds.maxZ));
+        double dx = point.x - x;
+        double dy = point.y - y;
+        double dz = point.z - z;
+        return dx * dx + dy * dy + dz * dz;
     }
 
     private void startApproach(AIPlayerEntity bot) {
@@ -823,7 +886,6 @@ public final class CombatTask extends AbstractTask {
         kills++;
         finishRangedLoadout(bot);
         bot.stopUsingItem();
-        eating = false;
 
         LivingEntity pressure = refreshRetreatThreat(bot);
         if (isImmediatePressure(bot, pressure)) {
@@ -1327,6 +1389,7 @@ public final class CombatTask extends AbstractTask {
 
     @Override
     protected void onPause(AIPlayerEntity bot) {
+        cancelCombatSplashHealing(bot, "combat_paused");
         finishRangedLoadout(bot);
         cancelPeekStep(bot);
         ShieldGuard.lowerIfOwner(bot, ShieldGuard.Owner.TASK);
@@ -1335,10 +1398,18 @@ public final class CombatTask extends AbstractTask {
 
     @Override
     protected void onAbort(AIPlayerEntity bot) {
+        cancelCombatSplashHealing(bot, "combat_aborted");
         finishRangedLoadout(bot);
         cancelPeekStep(bot);
         ShieldGuard.lowerIfOwner(bot, ShieldGuard.Owner.TASK);
         super.onAbort(bot);
+    }
+
+    private void cancelCombatSplashHealing(AIPlayerEntity bot, String reason) {
+        if (combatSplashPotionTask != null) {
+            combatSplashPotionTask.cancel(bot, reason);
+            combatSplashPotionTask = null;
+        }
     }
 
     private void finishOrAcquire(AIPlayerEntity bot) {

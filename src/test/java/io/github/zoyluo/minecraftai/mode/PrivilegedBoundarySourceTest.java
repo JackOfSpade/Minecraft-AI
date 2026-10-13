@@ -225,7 +225,7 @@ class PrivilegedBoundarySourceTest {
         String inFlight = safety.substring(rescueInFlight, beginRescue);
         assertTrue(safety.contains("private final Map<UUID, RescueStepAdmission> rescueSteps")
                         && safety.contains("private record RescueStepAdmission(AIPlayerEntity bot, ActionPack.StepLease lease,")
-                        && safety.contains("boolean hiddenWorldScan, BlockPos origin, BlockPos destination)"),
+                        && safety.contains("boolean hiddenWorldScan, boolean sourceWater, BlockPos origin, BlockPos destination)"),
                 "NavSafetyNet must latch exact ActionPack ownership as well as capability provenance and the physical corridor of its rescue step");
         int exactLease = inFlight.indexOf("if (!pack.stepInFlightFor(admission.lease()))");
         int exactResult = inFlight.indexOf("WalkedStep.Result result = pack.stepResultFor(admission.lease());", exactLease);
@@ -264,13 +264,16 @@ class PrivilegedBoundarySourceTest {
                 "NavSafetyNet may release a retained strict fence only through the exact rescue admission lease");
         int guard = safety.indexOf("private static boolean canContinueRescueStep(");
         int guardDestination = safety.indexOf("!step.cell().equals(admission.destination())", guard);
-        int guardCorridor = safety.indexOf("withinRescueStepContinuationEnvelope(bot.blockPosition(), admission, step.kind(), step.ticks())", guard);
+        int guardCorridor = safety.indexOf("withinRescueStepContinuationEnvelope(feet, admission, step.kind(), step.ticks())", guard);
+        int currentDriftProof = safety.indexOf("observedWaterEscapeCell(bot, bot.level(), feet, false) != WaterEscapeCell.WATER", guard);
         int continuationEnvelope = safety.indexOf("private static boolean withinRescueStepContinuationEnvelope(", guard);
-        assertTrue(guard >= 0 && guardDestination > guard && guardCorridor > guardDestination && continuationEnvelope > guard
+        assertTrue(guard >= 0 && guardDestination > guard && guardCorridor > guardDestination && currentDriftProof > guardCorridor
+                        && continuationEnvelope > guard
                         && safety.contains("withinRescueStepCorridor(feet, admission.origin(), admission.destination())")
                         && safety.contains("isNormalizableDryWalk(kind)")
-                        && safety.contains("activeStepTicks >= 0 && activeStepTicks <= 1"),
-                "the ActionPack continuation guard must bind its admitted destination and keep every rescue tick in its corridor, with only first-tick dry normalization at the source column");
+                        && safety.contains("activeStepTicks >= 0 && activeStepTicks <= 1")
+                        && safety.contains("withinRescueStepCurrentEnvelope(feet, admission.origin(), admission.destination())"),
+                "the ActionPack continuation guard must bind its admitted destination and keep every rescue tick in its corridor, except a one-cell current drift that is re-proved as visible water");
         int beginStep = safety.indexOf("private boolean beginRescueStep(");
         int strictProof = safety.indexOf("observedWaterEscapeCell(bot, bot.level(), cell, false)", beginStep);
         int envelopeProof = safety.indexOf("SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, cell, kind)", beginStep);

@@ -94,8 +94,8 @@ public final class BaritonePlanner {
         if (!ctx.minecraft().isSameThread()) {
             throw new IllegalStateException("BaritonePlanner.plan must be called on the server thread");
         }
-        BaritoneSettings.applyNavLimits();
         AIPlayerEntity bot = (AIPlayerEntity) ctx.player();
+        BaritoneSettings.applyNavLimits(bot);
 
         CalculationContext calc = new CalculationContext(baritone, true);
         BetterBlockPos start = ctx.playerFeet();

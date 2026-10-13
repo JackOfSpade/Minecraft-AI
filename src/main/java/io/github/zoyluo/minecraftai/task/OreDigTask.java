@@ -5235,7 +5235,7 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
             // same tick.
             return true;
         }
-        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceTorchAtFeet(bot);
         // A temporary use-owner can appear after the quiet-boundary guard.  Do not consume the
         // ordinary probe interval in that case: the target is still intact and lighting should
         // retry as soon as its legitimate owner clears.

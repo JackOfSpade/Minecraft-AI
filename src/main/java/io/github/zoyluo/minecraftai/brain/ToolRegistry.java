@@ -46,6 +46,7 @@ import io.github.zoyluo.minecraftai.task.ContainerTask;
 import io.github.zoyluo.minecraftai.task.CraftTask;
 import io.github.zoyluo.minecraftai.task.DismountBoatTask;
 import io.github.zoyluo.minecraftai.task.DiscoveryTask;
+import io.github.zoyluo.minecraftai.task.DigOutTask;
 import io.github.zoyluo.minecraftai.task.EatTask;
 import io.github.zoyluo.minecraftai.task.FishTask;
 import io.github.zoyluo.minecraftai.task.FarmTask;
@@ -179,6 +180,12 @@ public final class ToolRegistry {
                 return ok("baritone_walk_goal_started: " + pathResult.reason());
             }
             return fail("baritone_navigation_failed: " + pathResult.reason());
+        });
+
+        register("dig_to_surface", "Dig a safe, walkable stair upward until the bot reaches open sky. Use this when the player says to dig up, mine upward, or get to the surface. It preserves a floor for every step, refuses fluids and falling blocks, seals a newly exposed flow when possible, and never mines a blind vertical shaft. Supersedes any current task.", objectSchema().build(), (bot, args) -> {
+            Task task = DigOutTask.toSurface();
+            assignLlm(bot, task);
+            return ok("assigned: " + task.name());
         });
 
         register("mine_block", "Low-level single-block break at given coords. The block must be visible and within reach; hidden coordinates are refused. For gathering materials or mining counts, prefer assign_task with task_type mine.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
@@ -1090,7 +1097,7 @@ public final class ToolRegistry {
     /** assign_task and the task lifecycle tools it shares status/cancellation with. */
     private void registerTaskLifecycleTools() {
         register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, lighting, farming, fishing, trading, breeding, water travel, container work, or showing any known verified location. Use the dedicated gather tool to collect a specific item (it is strongly typed and will not silently drop the item argument the way this tool's generic params can), and use dedicated craft, eat, and smelt tools for those actions. task_type=gather remains available here only as a fallback after a goal failure; with count it means NEW/additional inventory items, never the total already carried, and without count it gathers for up to ten minutes while safely exploring and rescanning. Use task_type=clear_grass or task_type=break_blocks for an exact nearby physical block-breaking count when drops do not matter. For exposed surface blocks use task_type=mine: with a count it keeps the physical mining quota, while an omitted count gathers that block's normal drops for up to ten minutes. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool; both explicit-quota and no-count collection safely explore through repeated bounded observed hops and rescans, never by tunneling toward unseen ore. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
-                .property("task_type", stringSchema("move, find, show_location, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_ore, mine_valuables, harvest_crop, build, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, deposit, stockpile, or withdraw"))
+                .property("task_type", stringSchema("move, find, show_location, gather, clear_grass, break_blocks, forage, irrigate, milk_cow, raid_crops, attack, mine, mine_ore, mine_valuables, harvest_crop, build, light_area, farm, harvest, fish, trade, breed, follow, launch_boat, board_boat, boat_follow, exit_boat, hold, guard, dig_to_surface, deposit, stockpile, or withdraw"))
                 .property("params", objectSchema().build())
                 .required("task_type")
                 .required("params")
@@ -1221,6 +1228,7 @@ public final class ToolRegistry {
             case "stockpile" -> new StockpileTask(optionalBoolean(params, "all_except_tools", true));
             case "light_area" -> new LightAreaTask(optionalInt(params, "radius", 8), optionalInt(params, "max_torches", 8));
             case "follow" -> new FollowTask(optionalString(params, "player_name", ""));
+            case "dig_to_surface" -> DigOutTask.toSurface();
             case "launch_boat" -> new BoatLaunchTask(optionalBoolean(params, "board", false));
             case "board_boat" -> new BoardBoatTask();
             case "boat_follow" -> new BoatFollowTask(optionalString(params, "player_name", ""));

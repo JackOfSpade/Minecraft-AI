@@ -1,6 +1,7 @@
 package io.github.zoyluo.minecraftai;
 
 import io.github.zoyluo.minecraftai.mining.BreakVerdictCache;
+import io.github.zoyluo.minecraftai.autosprint.AutoSprintController;
 import io.github.zoyluo.minecraftai.brain.AmbientConversationCoordinator;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.brain.ChatCaptureListener;
@@ -94,6 +95,7 @@ public class MinecraftAiMod implements ModInitializer {
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             RuntimeLifecycleCoordinator.INSTANCE.onServerStopping(server);
+            AutoSprintController.INSTANCE.clear();
         });
         // Damage records (who hurt whom, in level game time) and the teleport counters are per server run.
         io.github.zoyluo.minecraftai.entity.RecentDamage.register();
@@ -126,6 +128,8 @@ public class MinecraftAiMod implements ModInitializer {
             io.github.zoyluo.minecraftai.task.AggroSense.clearAll();
         });
         ServerTickEvents.START_SERVER_TICK.register(server -> MiningAssistRuntime.beginTick());
+        ServerTickEvents.START_WORLD_TICK.register(AutoSprintController.INSTANCE::beforeWorldTick);
+        ServerTickEvents.END_WORLD_TICK.register(AutoSprintController.INSTANCE::afterWorldTick);
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             TpsGuard.INSTANCE.tick(server);
             TaskManager.INSTANCE.tickAll(server);

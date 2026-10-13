@@ -23,6 +23,8 @@ import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
 
 /**
@@ -92,6 +94,9 @@ public final class FollowTask extends AbstractTask {
     private final Set<UUID> abandonedBoats = new HashSet<>();
     private final ShelterExitDebtRepayer shelterExitDebtRepayer = new ShelterExitDebtRepayer();
     private final FollowStuckRecovery stuckRecovery = new FollowStuckRecovery();
+    private final FollowSelfSupportRecovery selfSupportRecovery = new FollowSelfSupportRecovery();
+    /** A land route reached water: retain water-exit ownership until the bot regains dry footing. */
+    private boolean waterExitForcedByLandRoute;
     private int directWalkCount;
     // A failed search whose straight-line fallback was refused (water, a drop, a wall on the line): the follower
     // waits at its bank and re-plans on the normal schedule, and tells the player so once until it next arrives.
@@ -114,6 +119,8 @@ public final class FollowTask extends AbstractTask {
     /** True only while a verified owner's live-coordinate route owns Baritone; named/non-owner follows retain strict observation. */
     private boolean baritoneOwnerFollow;
     private NavOutcome handledOutcome;
+    /** Last owner position proved to be inside a vanilla travel portal, retained only briefly for a portal handoff. */
+    private PortalDeparture portalDeparture;
     /** The no-progress rule of the running Baritone route (see FollowProgressWindow). */
     private final FollowProgressWindow baritoneProgress = new FollowProgressWindow();
     private int baritoneStarts;
@@ -240,6 +247,8 @@ public final class FollowTask extends AbstractTask {
         abandonedBoats.clear();
         shelterExitDebtRepayer.reset(bot);
         stuckRecovery.reset(bot, elapsed);
+        selfSupportRecovery.reset(bot);
+        waterExitForcedByLandRoute = false;
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         baritoneTargetPos = null;
         baritoneDirectionalPursuit = false;
@@ -248,6 +257,7 @@ public final class FollowTask extends AbstractTask {
         baritoneRadius = (int) STOP_DISTANCE;
         holdingStandoff = false;
         handledOutcome = bot.getActionPack().lastRouteOutcome();
+        portalDeparture = null;
         escort.reset();
         targetSamples.clear();
         targetSneakSince = -1L;
@@ -259,6 +269,12 @@ public final class FollowTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         ServerPlayer target = target(bot).orElse(null);
+        if (target != null && target.level() == bot.level()) {
+            rememberPortalDeparture(target, bot.level());
+        }
+        if (target != null && target.level() != bot.level() && followOwnerThroughPortal(bot, target)) {
+            return;
+        }
         if (target == null || target.level() != bot.level()) {
             lastTarget = null;
             escort.disengage();
@@ -309,6 +325,7 @@ public final class FollowTask extends AbstractTask {
         if (targetSwimming) {
             escort.disengage();
             suspendLandRecovery(bot);
+            waterExitForcedByLandRoute = false;
             abandonBoatChild(bot);
             // Swim-follow uses a bounded, individually observed physical-survival routine; a land route
             // that was still running must not keep writing the bot's inputs next to it.
@@ -331,7 +348,37 @@ public final class FollowTask extends AbstractTask {
         // The player has left the water but the bot is still in it: swim to a dry landing near
         // them first (this renews the narrow swim lease itself), then ordinary land follow runs.
         publishPace(bot, target);
-        if (swimming.exitWaterForLand(bot, target, elapsed, STOP_DISTANCE)) {
+        boolean botInWater = FollowSwimming.inWater(bot);
+        if (!botInWater) {
+            waterExitForcedByLandRoute = false;
+        } else {
+            NavOutcome endedRoute = bot.getActionPack().lastRouteOutcome();
+            if (endedRoute != null && endedRoute != handledOutcome
+                    && NavRouteRules.ROUTE_ENTERED_WATER.equals(endedRoute.reason())) {
+                // This was not an ordinary dry-route miss: the bot is already wet and Baritone's
+                // policy cannot continue from that start.  Give the observed water planner first
+                // ownership instead of emitting a dry-route warning and repeatedly replanning the
+                // same forbidden route while a current carries the bot farther from shore.
+                waterExitForcedByLandRoute = true;
+                handledOutcome = endedRoute;
+                baritoneTargetPos = null;
+                baritoneDirectionalPursuit = false;
+                baritoneOwnerFollow = false;
+                baritoneProgress.clear();
+                holdTargetPos = null;
+                repathBackoff = false;
+                nextRepathTick = elapsed;
+            }
+        }
+        // A land recovery miner can retain a self-support sidestep from the immediately previous
+        // land tick. Cancel it before FollowSwimming is allowed to admit an exit stroke: waiting
+        // until after exitWaterForLand() had already started that stroke let both controllers
+        // alternately replace the same ActionPack step, producing continuation-guard failures
+        // and repeated self-support refusals in the live follow log.
+        if (botInWater) {
+            suspendLandRecovery(bot);
+        }
+        if (swimming.exitWaterForLand(bot, target, elapsed, STOP_DISTANCE, waterExitForcedByLandRoute)) {
             escort.disengage();
             suspendLandRecovery(bot);
             dropBaritoneRoute(bot);
@@ -454,13 +501,13 @@ public final class FollowTask extends AbstractTask {
     }
 
     /**
-     * Land stuck recovery (stall clock, forced-repath schedule, and above all a dig-out that owns the mining
-     * controller) belongs to land follow only. Whenever swim/boat/exit-water logic takes a tick, or the task
-     * pauses/aborts, its state is reset (which also cancels an active dig-out and stops its mining) so nothing
+     * Land recovery belongs to land follow only. Whenever swim/boat/exit-water logic takes a tick, or the task
+     * pauses/aborts, both the generic unstick steps and a retained self-support break are cancelled so nothing
      * stale carries over and nothing keeps breaking blocks while another mode drives the bot.
      */
     private void suspendLandRecovery(AIPlayerEntity bot) {
         stuckRecovery.reset(bot, elapsed);
+        selfSupportRecovery.reset(bot);
     }
 
     private void followBoat(AIPlayerEntity bot, ServerPlayer target) {
@@ -566,10 +613,16 @@ public final class FollowTask extends AbstractTask {
         waiting = swimming.follow(bot, target, elapsed, SWIM_STOP_DISTANCE);
     }
 
-    /** Ticks between re-targeting a running Baritone route at the moving player (Baritone re-plans in between by itself). */
-    private static final int BARITONE_REGOAL_TICKS = 20;
-    /** The player must have moved this far (squared, blocks) from the last actual-player marker before the route is re-pointed. */
-    private static final double BARITONE_REGOAL_MOVED_SQ = 4.0D;
+    /**
+     * Ticks between re-targeting a running Baritone route at the moving player.  A re-goal renews
+     * the owner's terrain-evidence snapshot, so doing it once per second made sprint-follow spend
+     * a material part of every second rebuilding thousands of cells on the server thread.  The
+     * active route keeps driving during this two-second window; Baritone still replans its current
+     * route independently as the terrain changes.
+     */
+    private static final int BARITONE_REGOAL_TICKS = 40;
+    /** The player must have moved at least four blocks from the last actual-player marker before the route is re-pointed. */
+    private static final double BARITONE_REGOAL_MOVED_SQ = 16.0D;
 
     /**
      * Land follow uses a direct {@code GoalNear(player, radius)} for this bot's verified owner, even when the owner is outside
@@ -751,6 +804,70 @@ public final class FollowTask extends AbstractTask {
         return target != null && AIPlayerManager.INSTANCE.ownerOf(bot).filter(target.getUUID()::equals).isPresent();
     }
 
+    /**
+     * Records only a real, current vanilla travel portal under the followed player. This is intentionally
+     * much narrower than remembering any last position: portal follow may cross dimensions, while
+     * an ordinary logout or command teleport continues to use the safe waiting path.
+     */
+    private void rememberPortalDeparture(ServerPlayer target, Level level) {
+        BlockPos feet = target.blockPosition();
+        PortalAt portal = portalAt(level, feet);
+        if (portal != null) {
+            portalDeparture = new PortalDeparture(target.getUUID(), level, portal.position(), portal.kind(), elapsed);
+        }
+    }
+
+    /** Performs a one-shot, source-portal-proved transfer to the owner's visible safe arrival cell. */
+    private boolean followOwnerThroughPortal(AIPlayerEntity bot, ServerPlayer target) {
+        PortalDeparture departure = portalDeparture;
+        if (!isVerifiedOwner(bot, target) || departure == null
+                || !departure.owner().equals(target.getUUID())
+                || departure.source() != bot.level()
+                || elapsed - departure.tick() > 200
+                || !departure.kind().connects(bot.level(), target.level())
+                || !departure.kind().matches(portalAt(bot.level(), departure.portal()))) {
+            return false;
+        }
+        portalDeparture = null; // A failed destination proof must not retry a stale portal every tick.
+        escort.disengage();
+        NavSafetyNet.INSTANCE.clearFollowSwim(bot);
+        suspendLandRecovery(bot);
+        swimming.cancelStep(bot);
+        abandonBoatChild(bot);
+        boolean followed = AIPlayerManager.INSTANCE.followOwnerThroughPortal(bot, target);
+        if (followed) {
+            holdTargetPos = null;
+            baritoneTargetPos = null;
+            baritoneDirectionalPursuit = false;
+            baritoneOwnerFollow = false;
+            baritoneProgress.clear();
+            repathBackoff = false;
+            nextRepathTick = elapsed;
+            waiting = false;
+            BotLog.action(bot, "followed_owner_portal",
+                    "owner", target.getGameProfile().name(),
+                    "portal", departure.kind().label,
+                    "source_portal", departure.portal().toShortString());
+        } else {
+            waiting = true;
+        }
+        return true;
+    }
+
+    /** Finds the portal cell the player is actually standing in; neither frames nor gateways qualify. */
+    private static PortalAt portalAt(Level level, BlockPos center) {
+        for (int dy = -1; dy <= 2; dy++) {
+            BlockPos candidate = center.offset(0, dy, 0);
+            if (level.getBlockState(candidate).is(Blocks.NETHER_PORTAL)) {
+                return new PortalAt(candidate.immutable(), PortalKind.NETHER);
+            }
+            if (level.getBlockState(candidate).is(Blocks.END_PORTAL)) {
+                return new PortalAt(candidate.immutable(), PortalKind.END);
+            }
+        }
+        return null;
+    }
+
     private static boolean isObservationAdmissionFailure(String reason) {
         if (reason == null) {
             return false;
@@ -847,6 +964,30 @@ public final class FollowTask extends AbstractTask {
             repathBackoff = false;
             nextRepathTick = elapsed;
         }
+        FollowSelfSupportRecovery.Tick selfSupportTick = selfSupportRecovery.tick(bot);
+        if (selfSupportTick == FollowSelfSupportRecovery.Tick.ACTIVE) {
+            waiting = true;
+            return;
+        }
+        if (selfSupportTick == FollowSelfSupportRecovery.Tick.FAILED) {
+            repathBackoff = true;
+            nextRepathTick = elapsed + REPATH_TICKS;
+            holdTargetPos = target.blockPosition().immutable();
+            waiting = true;
+            return;
+        }
+        if (selfSupportTick == FollowSelfSupportRecovery.Tick.COMPLETE) {
+            // The exact refused block is gone and Moss is on the miner's verified side stance.
+            // Replan now rather than letting generic stalled-route recovery grab the old spot.
+            stuckRecovery.reset(bot, elapsed);
+            repathBackoff = false;
+            nextRepathTick = elapsed;
+            holdTargetPos = null;
+        }
+        if (beginSelfSupportRecovery(bot)) {
+            waiting = true;
+            return;
+        }
         if (stuckRecovery.tick(bot, target, elapsed, STOP_DISTANCE)) {
             waiting = true;
             return;
@@ -859,6 +1000,31 @@ public final class FollowTask extends AbstractTask {
         // An unavailable/refused Baritone route is a visible follow hold, never a second
         // navigator. The swimming branch above retains its bounded physical safety moves.
         followLandBaritone(bot, target);
+    }
+
+    /**
+     * Converts a just-ended Baritone {@code policy_refused} route into a one-block, stateful
+     * self-support recovery before generic stuck handling gets a chance to replan the same break.
+     */
+    private boolean beginSelfSupportRecovery(AIPlayerEntity bot) {
+        if (selfSupportRecovery.isActive() || !bot.getActionPack().isPathExecutorIdle()) {
+            return false;
+        }
+        NavOutcome ended = bot.getActionPack().lastRouteOutcome();
+        if (ended == null || ended == handledOutcome || !NavRouteRules.POLICY_REFUSED.equals(ended.reason())
+                || !selfSupportRecovery.beginFromLatestRefusal(bot)) {
+            return false;
+        }
+        handledOutcome = ended;
+        baritoneTargetPos = null;
+        baritoneDirectionalPursuit = false;
+        baritoneOwnerFollow = false;
+        baritoneProgress.clear();
+        holdTargetPos = null;
+        repathBackoff = false;
+        nextRepathTick = elapsed;
+        stuckRecovery.reset(bot, elapsed);
+        return true;
     }
 
     /**
@@ -934,6 +1100,8 @@ public final class FollowTask extends AbstractTask {
     @Override
     protected void onPause(AIPlayerEntity bot) {
         escort.disengage();
+        waterExitForcedByLandRoute = false;
+        portalDeparture = null;
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         suspendLandRecovery(bot);
         swimming.cancelStep(bot);
@@ -948,6 +1116,8 @@ public final class FollowTask extends AbstractTask {
     @Override
     protected void onResume(AIPlayerEntity bot) {
         suspendLandRecovery(bot);
+        waterExitForcedByLandRoute = false;
+        portalDeparture = null;
         holdTargetPos = null;
         if (boatFollow != null && boatFollow.state() == TaskState.PAUSED) {
             boatFollow.resume(bot);
@@ -957,6 +1127,8 @@ public final class FollowTask extends AbstractTask {
     @Override
     protected void onAbort(AIPlayerEntity bot) {
         escort.disengage();
+        waterExitForcedByLandRoute = false;
+        portalDeparture = null;
         lastTarget = null;
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         suspendLandRecovery(bot);
@@ -967,5 +1139,41 @@ public final class FollowTask extends AbstractTask {
             boatFollow.abort(bot);
         }
         super.onAbort(bot);
+    }
+
+    private record PortalDeparture(UUID owner, Level source, BlockPos portal, PortalKind kind, long tick) {
+    }
+
+    private record PortalAt(BlockPos position, PortalKind kind) {
+    }
+
+    /** Vanilla portals with a genuine dimension transition. End gateways are same-dimension jumps. */
+    private enum PortalKind {
+        NETHER("nether") {
+            @Override
+            boolean connects(Level source, Level destination) {
+                return (source.dimension() == Level.OVERWORLD && destination.dimension() == Level.NETHER)
+                        || (source.dimension() == Level.NETHER && destination.dimension() == Level.OVERWORLD);
+            }
+        },
+        END("end") {
+            @Override
+            boolean connects(Level source, Level destination) {
+                return (source.dimension() == Level.OVERWORLD && destination.dimension() == Level.END)
+                        || (source.dimension() == Level.END && destination.dimension() == Level.OVERWORLD);
+            }
+        };
+
+        private final String label;
+
+        PortalKind(String label) {
+            this.label = label;
+        }
+
+        abstract boolean connects(Level source, Level destination);
+
+        boolean matches(PortalAt portal) {
+            return portal != null && portal.kind() == this;
+        }
     }
 }

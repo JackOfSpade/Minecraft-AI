@@ -465,7 +465,7 @@ public final class MineValuablesTask extends AbstractTask {
             return false;
         }
         var world = bot.level();
-        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceTorchAtFeet(bot);
         // IN_PROGRESS means a temporary vanilla use owner won after the quiet-boundary probe.
         // It is not a completed scan: retry immediately once that owner releases rather than
         // consuming the normal cadence and continuing through a dark gap.

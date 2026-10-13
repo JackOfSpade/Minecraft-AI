@@ -7,6 +7,7 @@ import io.github.zoyluo.minecraftai.action.EquipAction;
 import io.github.zoyluo.minecraftai.action.InteractAction;
 import io.github.zoyluo.minecraftai.action.InventoryAction;
 import io.github.zoyluo.minecraftai.action.MaterialPalette;
+import io.github.zoyluo.minecraftai.action.RangedWeapon;
 import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.brain.ToolDefinition;
 import io.github.zoyluo.minecraftai.brain.ToolRegistry;
@@ -323,18 +324,18 @@ public final class CombatHardeningGameTests {
         require(context, !CombatCore.hostileTo(bot, other) && !CombatCore.hostileTo(bot, owner),
                 "the owner or another bot was classed hostile");
 
-        // A bow must not be released into a friend standing on the line of fire.
+        // Companion projectile hooks let a bow continue through a friend to its hostile target.
         Husk husk = spawnHusk(context, origin.east(8));
         other.teleportTo(world, origin.getX() + 4.5D, origin.getY(), origin.getZ() + 0.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        require(context, StrikeLegality.friendlyOnLineOfFire(bot, husk),
-                "a friend on the line of fire was not detected");
+        require(context, StrikeLegality.shotRefusal(bot, husk, RangedWeapon.shapeOf(new ItemStack(Items.BOW))) == null,
+                "a friendly companion incorrectly blocked an otherwise clear shot");
         other.teleportTo(world, origin.getX() + 4.5D, origin.getY(), origin.getZ() + 6.5D,
                 Set.of(), 0.0F, 0.0F, true);
         owner.teleportTo(world, origin.getX() + 0.5D, origin.getY(), origin.getZ() + 6.5D,
                 Set.of(), 0.0F, 0.0F, true);
-        require(context, !StrikeLegality.friendlyOnLineOfFire(bot, husk),
-                "a friend off the line of fire blocked the shot");
+        require(context, StrikeLegality.shotRefusal(bot, husk, RangedWeapon.shapeOf(new ItemStack(Items.BOW))) == null,
+                "a friend away from the shot incorrectly blocked it");
         husk.discard();
         AIPlayerManager.INSTANCE.despawn(world.getServer(), other.getGameProfile().name());
         despawnAndComplete(context, bot);
@@ -841,7 +842,7 @@ public final class CombatHardeningGameTests {
     }
 
 
-    // ------------------------------------------------------------------ bow give-up: cancel, never fire
+    // ------------------------------------------------------------------ companion-safe bow fire
 
     /** Arrow entities the bot itself loosed (a stray arrow of another test in the same world does not count). */
     private static int botArrows(GameTestHelper context, AIPlayerEntity bot) {
@@ -850,14 +851,9 @@ public final class CombatHardeningGameTests {
                 bot.getBoundingBox().inflate(64.0D), arrow -> arrow.getOwner() == bot).size();
     }
 
-    /**
-     * A friend (the owner) stands on the line of fire of a bow that is drawn fully: the bot must hold, then
-     * give the bow up by CANCELLING the draw. Releasing it would fire the arrow into the owner, which is
-     * exactly what the guard exists to prevent, so no Arrow entity may ever exist and no arrow leaves the
-     * inventory, while the fight goes on without the bow.
-     */
-    @GameTest(environment = ENV + "friendly_owner_on_the_line_of_fire_gives_the_bow_up_without_a_shot", maxTicks = 320 + PerceptionFixtures.MAX_WAIT_TICKS)
-    public void friendlyOwnerOnTheLineOfFireGivesTheBowUpWithoutAShot(GameTestHelper context) {
+    /** A bow may fire through its owner, but the owner must be skipped and the hostile must be hit. */
+    @GameTest(environment = ENV + "friendly_owner_on_the_line_of_fire_is_skipped_by_bow", maxTicks = 320 + PerceptionFixtures.MAX_WAIT_TICKS)
+    public void friendlyOwnerOnTheLineOfFireIsSkippedByBow(GameTestHelper context) {
         ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendLineGT", 170, -4, 16, owner.getUUID());
         var world = context.getLevel();
@@ -873,58 +869,35 @@ public final class CombatHardeningGameTests {
                 Set.of(), 0.0F, 0.0F, true);
         PerceptionFixtures.faceToward(bot, husk);
         PerceptionFixtures.afterNoticed(context, bot, List.of(husk), since -> {
-        require(context, StrikeLegality.friendlyOnLineOfFire(bot, husk),
-                "the fixture owner was not on the line of fire");
+        require(context, StrikeLegality.shotRefusal(bot, husk, RangedWeapon.shapeOf(new ItemStack(Items.BOW))) == null,
+                "the owner incorrectly blocked the clear bow shot");
         int arrowsBefore = arrows(bot);
+        float ownerHealth = owner.getHealth();
         CombatTask combat = new CombatTask(EntityType.HUSK, 1, 6.0F);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_friend_line"));
 
-        boolean[] sawFullDraw = {false};
-        int[] giveUpTick = {-1};
+        boolean[] shot = {false};
         PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
-            require(context, botArrows(context, bot) == 0,
-                    "an arrow was spawned with the owner on the line of fire: " + combat.describe());
-            require(context, arrows(bot) >= arrowsBefore,
-                    "an arrow left the inventory (a shot) with the owner on the line of fire");
-            if (giveUpTick[0] < 0) {
-                // The owner stays on the line for the whole hold.
-                owner.teleportTo(world, origin.getX() + 6.5D, origin.getY(), origin.getZ() + 0.5D,
-                        Set.of(), 0.0F, 0.0F, true);
-                if (bot.isUsingItem() && bot.getTicksUsingItem() >= 20
-                        && combat.describe().contains("phase=RANGED")) {
-                    sawFullDraw[0] = true;
-                }
-                if (combat.isRangedSuppressed()) {
-                    giveUpTick[0] = (int) since.getAsLong();
-                    require(context, sawFullDraw[0],
-                            "the bow was given up without ever being fully drawn: the give-up was not the "
-                                    + "dangerous one (bow drawn at full pull)");
-                    require(context, !bot.isUsingItem(),
-                            "the bow is still drawn after the give-up: " + combat.describe());
-                    require(context, !combat.describe().contains("phase=RANGED"),
-                            "the bot did not fall back from the ranged phase: " + combat.describe());
-                }
-            } else if (since.getAsLong() >= giveUpTick[0] + 25) {
-                husk.discard();
+            owner.teleportTo(world, origin.getX() + 6.5D, origin.getY(), origin.getZ() + 0.5D,
+                    Set.of(), 0.0F, 0.0F, true);
+            require(context, owner.getHealth() == ownerHealth,
+                    "the bow hit its owner instead of passing through them");
+            shot[0] |= botArrows(context, bot) > 0 || arrows(bot) < arrowsBefore;
+            if (!husk.isAlive()) {
+                require(context, shot[0], "the bow killed the husk without an observed shot");
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_friend_line_done");
                 despawnAndComplete(context, bot);
-            }
-            if (giveUpTick[0] < 0 && since.getAsLong() >= 290) {
-                context.fail(Component.nullToEmpty("the bow was never given up: sawFullDraw=" + sawFullDraw[0]
-                        + " " + combat.describe() + " using=" + bot.isUsingItem()
-                        + " ticks=" + bot.getTicksUsingItem()));
+            } else if (since.getAsLong() >= 290) {
+                context.fail(Component.nullToEmpty("the bow never reached the husk through its owner: " + combat.describe()));
             }
         });
         });
     }
 
-    /**
-     * The same guard on the cover-peek path: with the owner standing on the line of fire at the end of each
-     * peek the drawn bow must never be released; after a few blocked peeks it is given up by cancelling.
-     */
-    @GameTest(environment = ENV + "friendly_owner_on_the_peek_line_gives_the_bow_up_without_a_shot", maxTicks = 900 + PerceptionFixtures.MAX_WAIT_TICKS)
-    public void friendlyOwnerOnThePeekLineGivesTheBowUpWithoutAShot(GameTestHelper context) {
+    /** The cover-peek bow shot likewise passes through an ally instead of suppressing ranged combat. */
+    @GameTest(environment = ENV + "friendly_owner_on_the_peek_line_is_skipped_by_bow", maxTicks = 900 + PerceptionFixtures.MAX_WAIT_TICKS)
+    public void friendlyOwnerOnThePeekLineIsSkippedByBow(GameTestHelper context) {
         ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendPeekGT", 182, -4, 16, owner.getUUID());
         var world = context.getLevel();
@@ -943,36 +916,28 @@ public final class CombatHardeningGameTests {
         require(context, CombatCore.rangedThreatsAround(bot, 24.0D).size() >= 2,
                 "the skeleton fixtures were not two observable ranged threats");
         int arrowsBefore = arrows(bot);
+        float ownerHealth = owner.getHealth();
         CombatTask combat = new CombatTask(EntityType.SKELETON, 2, 6.0F);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_friend_peek"));
 
         int[] peekTicks = {0};
-        int[] giveUpTick = {-1};
+        boolean[] shot = {false};
         PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
-            require(context, botArrows(context, bot) == 0,
-                    "an arrow was spawned with the owner on the peek line: " + combat.describe());
-            require(context, arrows(bot) >= arrowsBefore,
-                    "an arrow left the inventory (a shot) with the owner on the peek line");
-            if (giveUpTick[0] < 0) {
-                if (combat.describe().contains("phase=COVER_PEEK")) {
-                    peekTicks[0]++;
-                    placeOnLineOfFire(owner, bot, first.distanceTo(bot) <= second.distanceTo(bot) ? first : second);
-                }
-                if (combat.isRangedSuppressed()) {
-                    giveUpTick[0] = (int) since.getAsLong();
-                    require(context, peekTicks[0] > 0, "the bow was given up before any peek: " + combat.describe());
-                    require(context, !bot.isUsingItem() && !combat.describe().contains("phase=COVER"),
-                            "the bot is still in cover with the bow drawn after the give-up: " + combat.describe());
-                }
-            } else if (since.getAsLong() >= giveUpTick[0] + 25) {
+            if (combat.describe().contains("phase=COVER_PEEK")) {
+                peekTicks[0]++;
+                placeOnLineOfFire(owner, bot, first.distanceTo(bot) <= second.distanceTo(bot) ? first : second);
+            }
+            require(context, owner.getHealth() == ownerHealth,
+                    "the cover-peek bow hit its owner instead of passing through them");
+            shot[0] |= botArrows(context, bot) > 0 || arrows(bot) < arrowsBefore;
+            if (shot[0] && peekTicks[0] > 0) {
                 first.discard();
                 second.discard();
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_friend_peek_done");
                 despawnAndComplete(context, bot);
-            }
-            if (giveUpTick[0] < 0 && since.getAsLong() >= 840) {
-                context.fail(Component.nullToEmpty("the peek bow was never given up: peekTicks=" + peekTicks[0]
+            } else if (since.getAsLong() >= 840) {
+                context.fail(Component.nullToEmpty("the peek bow never fired through its owner: peekTicks=" + peekTicks[0]
                         + " " + combat.describe() + " " + combat.state()));
             }
         });

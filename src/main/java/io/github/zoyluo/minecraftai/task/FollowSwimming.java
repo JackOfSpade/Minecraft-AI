@@ -172,7 +172,7 @@ final class FollowSwimming {
     }
 
     /** Immutable physical/capability admission for a Follow-owned walked step. */
-    private record StepAdmission(boolean hiddenWorldScan, BlockPos origin, BlockPos destination) {
+    private record StepAdmission(boolean hiddenWorldScan, boolean sourceWater, BlockPos origin, BlockPos destination) {
     }
 
     /** Complete context of a completed-negative water-entry scan. */
@@ -958,14 +958,15 @@ final class FollowSwimming {
      * @return true when this class owned the tick (the caller must not run land follow), false when
      *         the bot is not in water or no way out is known (the caller falls back to land logic)
      */
-    boolean exitWaterForLand(AIPlayerEntity bot, ServerPlayer target, int elapsed, double standoff) {
+    boolean exitWaterForLand(AIPlayerEntity bot, ServerPlayer target, int elapsed, double standoff,
+                             boolean forceWetExit) {
         ServerLevel world = bot.level();
         beginStrictWaterWork(world);
         observeAir(bot, world);
         if (stepHoldsTheTick(bot, world, elapsed)) {
             return true;
         }
-        if (!needsWaterExit(bot, target, standoff)) {
+        if (!forceWetExit && !needsWaterExit(bot, target, standoff)) {
             // Dry, or wading through shallows that land follow can handle itself (its pathfinder, stop
             // distance and stuck recovery): nothing here may run a water search for it.
             clearRoute();
@@ -998,7 +999,11 @@ final class FollowSwimming {
             RouteSearchQuery exitQuery = currentRouteSearchQuery(bot, target.blockPosition(),
                     SwimRoute.Goal.EXIT, standoff);
             if (elapsed < exitFailedUntilTick && exitQuery.equals(exitFailureQuery)) {
-                return false;
+                // A just-refused land route established that Baritone cannot take over this wet
+                // starting cell.  Keep the explicit water-exit owner until its bounded retry,
+                // rather than bouncing back into the same costly Baritone refusal every tick.
+                waiting = forceWetExit;
+                return forceWetExit;
             }
             if (!exitQuery.equals(exitFailureQuery)) {
                 exitFailedUntilTick = 0;
@@ -1020,7 +1025,8 @@ final class FollowSwimming {
             if (route == null) {
                 exitFailedUntilTick = elapsed + 40;
                 exitFailureQuery = exitQuery;
-                return false;
+                waiting = forceWetExit;
+                return forceWetExit;
             }
         }
         exitFailedUntilTick = 0;
@@ -1592,7 +1598,8 @@ final class FollowSwimming {
         if (WalkedStep.refusal(bot, cell, kind) != null) {
             return false;
         }
-        StepAdmission admission = new StepAdmission(hiddenWorldScan, bot.blockPosition().immutable(), cell.immutable());
+        StepAdmission admission = new StepAdmission(hiddenWorldScan, isSwimCell(bot.level(), bot.blockPosition()),
+                bot.blockPosition().immutable(), cell.immutable());
         ActionPack.StepLease lease = bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason),
                 (guardBot, step) -> canContinueObservedStep(guardBot, step, admission));
         if (lease == null) {
@@ -1615,9 +1622,15 @@ final class FollowSwimming {
                                                    StepAdmission admission) {
         // Do the capability-free physical provenance check before any fresh world observation.
         // The narrow first-tick source-settling envelope mirrors WalkedStep's own no-world-read
-        // normalization; a distant controller relocation can never retain this step's keys.
+        // normalization. A real flowing-water current may move an already-swimming body one
+        // adjacent cell sideways or backwards before its stroke has finished, so retain that
+        // equally narrow water-only envelope as well. The latter is re-proved as observed water
+        // below; a distant controller relocation can never retain this step's keys.
+        BlockPos feet = bot.blockPosition();
+        boolean currentDrift = step.kind() == WalkedStep.Kind.SWIM && admission.sourceWater()
+                && withinStepSwimCurrentEnvelope(feet, admission.origin(), admission.destination());
         if (!step.cell().equals(admission.destination())
-                || !withinStepContinuationEnvelope(bot.blockPosition(), admission, step.kind(), step.ticks())) {
+                || (!withinStepContinuationEnvelope(feet, admission, step.kind(), step.ticks()) && !currentDrift)) {
             return false;
         }
         if (admission.hiddenWorldScan()) {
@@ -1633,6 +1646,16 @@ final class FollowSwimming {
         if (step.kind() == WalkedStep.Kind.SWIM ? !observed.isWater() : observed != SwimRoute.Cell.DRY) {
             return false;
         }
+        // The widened envelope above is solely for a current displacement, never a second route
+        // cell. Keep it only while that displaced feet cell is itself visibly water; this lets a
+        // swimmer push against a river instead of cancelling every stroke, without continuing
+        // through an unseen shore, hazard, or dry cell.
+        if (currentDrift) {
+            SwimRoute.Cell current = SwimRoute.observedCell(bot, bot.level(), feet, false);
+            if (current == null || !current.isWater()) {
+                return false;
+            }
+        }
         return SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind());
     }
 
@@ -1647,6 +1670,14 @@ final class FollowSwimming {
             return true;
         }
         BlockPos origin = admission.origin();
+        // A swimmer can bob one block below the waterline while entering a proved dry landing.
+        // Keep that exit stroke alive without widening its horizontal corridor; the destination
+        // still has to remain a visible dry cell and its complete WalkedStep refusal envelope is
+        // still re-proved below.
+        if (admission.sourceWater() && isNormalizableDryWalk(kind)
+                && withinStepSwimSettlingEnvelope(feet, origin, admission.destination())) {
+            return true;
+        }
         return isNormalizableDryWalk(kind)
                 && activeStepTicks >= 0 && activeStepTicks <= 1
                 && feet.getX() == origin.getX()
@@ -1665,6 +1696,21 @@ final class FollowSwimming {
                                                            BlockPos destination) {
         return between(feet.getX(), origin.getX(), destination.getX())
                 && between(feet.getZ(), origin.getZ(), destination.getZ())
+                && feet.getY() >= Math.min(origin.getY(), destination.getY()) - 1
+                && feet.getY() <= Math.max(origin.getY(), destination.getY()) + 1;
+    }
+
+    /**
+     * A water current can displace a swimmer one local cell before their next input tick. This is
+     * deliberately no wider than one cell around the already-admitted stroke, and callers must
+     * still prove the displaced feet cell is observed water before keeping the input alive.
+     */
+    private static boolean withinStepSwimCurrentEnvelope(BlockPos feet, BlockPos origin,
+                                                          BlockPos destination) {
+        return feet.getX() >= Math.min(origin.getX(), destination.getX()) - 1
+                && feet.getX() <= Math.max(origin.getX(), destination.getX()) + 1
+                && feet.getZ() >= Math.min(origin.getZ(), destination.getZ()) - 1
+                && feet.getZ() <= Math.max(origin.getZ(), destination.getZ()) + 1
                 && feet.getY() >= Math.min(origin.getY(), destination.getY()) - 1
                 && feet.getY() <= Math.max(origin.getY(), destination.getY()) + 1;
     }

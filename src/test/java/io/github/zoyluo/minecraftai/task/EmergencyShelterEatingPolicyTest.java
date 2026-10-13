@@ -8,6 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EmergencyShelterEatingPolicyTest {
     @Test
+    void criticallyLowHealthStartsImmediateCoverInsteadOfAPathRetreat() {
+        assertTrue(EmergencyShelterTask.isCriticalImmediateCoverHealth(6.0F));
+        assertTrue(EmergencyShelterTask.isCriticalImmediateCoverHealth(2.5F));
+        assertFalse(EmergencyShelterTask.isCriticalImmediateCoverHealth(6.01F));
+        assertFalse(EmergencyShelterTask.isCriticalImmediateCoverHealth(0.0F));
+    }
+
+    @Test
     void recoveryShelterTopsHungerAllTheWayToTwenty() {
         assertTrue(EmergencyShelterTask.shouldStartHoldEating(17.0F, 19));
         assertTrue(EmergencyShelterTask.shouldStartHoldEating(17.0F, 18));
@@ -79,6 +87,14 @@ class EmergencyShelterEatingPolicyTest {
                 "the naturalRegeneration gamerule off stalls even a full hunger bar");
     }
 
+    @Test
+    void healingPotionKeepsAWoundedShelterBotOutOfTheNoSuppliesState() {
+        assertFalse(EmergencyShelterTask.isHealingStalledWithoutRecoverySupply(
+                8.0F, 20.0F, false, true, false));
+        assertTrue(EmergencyShelterTask.isHealingStalledWithoutRecoverySupply(
+                8.0F, 20.0F, false, false, false));
+    }
+
     // Point 6's 50%-HP exception: give up waiting and fight once at/above half health, otherwise
     // stay sealed and wait for a rescue.
     @Test
@@ -95,7 +111,7 @@ class EmergencyShelterEatingPolicyTest {
         assertTrue(EmergencyShelterTask.isRecoveryStatusDue(160, 60));
         assertEquals("Shelter status: 8/20 HP, hunger 20/20. Still healing before I resume defense.",
                 EmergencyShelterTask.recoveryStatusMessage(7.5F, 20.0F, 20, false));
-        assertEquals("Shelter status: 8/20 HP, hunger 17/20. I need food before I can keep healing.",
+        assertEquals("Shelter status: 8/20 HP, hunger 17/20. I need food or a healing potion before I can keep healing.",
                 EmergencyShelterTask.recoveryStatusMessage(7.5F, 20.0F, 17, true));
         assertEquals("Shelter status: 20/20 HP, hunger 20/20. Fully healed; I am waiting for a safe moment to leave and resume defense.",
                 EmergencyShelterTask.recoveryStatusMessage(20.0F, 20.0F, 20, false));

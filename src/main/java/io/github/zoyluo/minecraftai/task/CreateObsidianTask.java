@@ -1001,7 +1001,7 @@ public final class CreateObsidianTask extends AbstractTask implements Checkpoint
         if (!hasSearchLightingResource(bot)) {
             return false;
         }
-        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceTorchAtFeet(bot);
         if (placement == AutomaticLighting.Placement.PLACED) {
             lastProgressTick = totalBudget();
             BotLog.action(bot, "create_obsidian_search_auto_torch",

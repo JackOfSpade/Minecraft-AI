@@ -64,6 +64,12 @@ public final class BotTickCoordinator {
             // shield it raised that nothing threatens any more. TaskManager.tickAll ran before this coordinator, so the tasks read its
             // state on the next tick; it never consumes the tick and never throws.
             ShieldGuard.INSTANCE.tickBot(server, bot);
+            // Background cave lighting is a single immediate vanilla placement, never the old
+            // route-owning light_area job. It is therefore safe to run during an ordinary task:
+            // AutomaticLighting retains the selected slot/aim and refuses every other action owner.
+            if (!handled) {
+                AutomaticLighting.tryPlaceTorchAtFeetPassively(bot, tick);
+            }
             if (!handled && GoalExecutor.INSTANCE.tickBot(server, bot)) {
                 continue;
             }

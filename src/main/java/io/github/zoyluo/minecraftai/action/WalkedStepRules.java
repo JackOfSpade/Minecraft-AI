@@ -12,7 +12,7 @@ public final class WalkedStepRules {
     public static final int TIMEOUT_TICKS_PER_BLOCK = 8;
     /** A drop presses no key once the bot is this close to the middle of its hole (a body 0.6 wide falls into a one-block hole from within 0.2). */
     public static final double DROP_CENTRED = 0.1D;
-    /** Vanilla fall damage begins after three blocks; ordinary dry walked drops never exceed this. */
+    /** Vanilla fall damage begins after three blocks. */
     public static final int MAX_ZERO_DAMAGE_FALL_BLOCKS = 3;
     /** Ground friction leaves a released walker sliding about 1.3 ticks of its speed: the keys are let go that far before the point. */
     public static final double BRAKE_FACTOR = 1.3D;
@@ -68,8 +68,11 @@ public final class WalkedStepRules {
         return switch (kind) {
             case FLAT -> dy == 0 && horizontal == 1;
             case STEP_UP -> dy == 1 && horizontal == 1;
-            case STEP_DOWN -> isZeroDamageFall(-dy) && horizontal == 1;
-            case DROP -> isZeroDamageFall(-dy) && dx == 0 && dz == 0;
+            // Whether a particular damaging descent is survivable depends on the bot's current
+            // health, so WalkedStep.refusal performs that stateful check before any input is
+            // pressed.  This pure offset rule only describes the shape of a fall.
+            case STEP_DOWN -> dy < 0 && horizontal == 1;
+            case DROP -> dy < 0 && dx == 0 && dz == 0;
             case SWIM -> Math.abs(dy) <= 1 && horizontal <= 1 && (horizontal + Math.abs(dy)) > 0;
             case SNEAK_SHIFT, RECENTER, PUSH_OUT -> dx == 0 && dy == 0 && dz == 0;
         };
@@ -92,7 +95,7 @@ public final class WalkedStepRules {
         if (dy == 1) {
             return WalkedStep.Kind.STEP_UP;
         }
-        return isZeroDamageFall(-dy) ? WalkedStep.Kind.STEP_DOWN : null;
+        return dy < 0 ? WalkedStep.Kind.STEP_DOWN : null;
     }
 
     /** Whether a dry fall of {@code fallBlocks} has vanilla fall damage zero. */

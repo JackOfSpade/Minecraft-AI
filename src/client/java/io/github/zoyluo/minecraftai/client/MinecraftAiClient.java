@@ -22,6 +22,7 @@ public final class MinecraftAiClient implements ClientModInitializer {
     }
 
     private void onClientTick(Minecraft client) {
+        AutoSprintClient.INSTANCE.tick(client);
         BotPanelScreen.Mode mode = MinecraftAiKeyBindings.pollToggle(client);
         if (mode == null) {
             return;

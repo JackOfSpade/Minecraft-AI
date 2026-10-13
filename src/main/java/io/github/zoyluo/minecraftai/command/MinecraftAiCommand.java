@@ -2,14 +2,20 @@ package io.github.zoyluo.minecraftai.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import io.github.zoyluo.minecraftai.autosprint.AutoSprintController;
+import io.github.zoyluo.minecraftai.autosprint.AutoSprintDirection;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.GameType;
 
@@ -36,6 +42,8 @@ public final class MinecraftAiCommand {
                                 .executes(context -> despawn(context.getSource(), StringArgumentType.getString(context, "name")))))
                 .then(literal("list")
                         .executes(context -> list(context.getSource())))
+                .then(literal("last-death")
+                        .executes(context -> returnToLastDeath(context.getSource())))
                 .then(literal("recall")
                         .then(argument("name", StringArgumentType.word())
                                 .executes(context -> recallCompanion(context.getSource(),
@@ -46,6 +54,12 @@ public final class MinecraftAiCommand {
                                 .then(argument("name", StringArgumentType.word())
                                         .executes(context -> recallCompanion(context.getSource(),
                                                 StringArgumentType.getString(context, "name"))))))
+                .then(literal("autosprint")
+                        .then(literal("north").executes(context -> autoSprint(context.getSource(), AutoSprintDirection.NORTH)))
+                        .then(literal("south").executes(context -> autoSprint(context.getSource(), AutoSprintDirection.SOUTH)))
+                        .then(literal("east").executes(context -> autoSprint(context.getSource(), AutoSprintDirection.EAST)))
+                        .then(literal("west").executes(context -> autoSprint(context.getSource(), AutoSprintDirection.WEST)))
+                        .then(literal("stop").executes(context -> stopAutoSprint(context.getSource()))))
                 .then(MinecraftAiBrainSubcommand.build())
                 .then(MinecraftAiLogSubcommand.build())
                 .then(MinecraftAiPersistSubcommand.build())
@@ -57,6 +71,67 @@ public final class MinecraftAiCommand {
                 .then(MinecraftAiTaskSubcommand.build())
                 .then(MinecraftAiDeplintSubcommand.build())
                 .then(MinecraftAiSnapshotSubcommand.build()));
+    }
+
+    private static int autoSprint(CommandSourceStack source, AutoSprintDirection direction) {
+        ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendFailure(Component.literal("[Minecraft-AI] Auto sprint must be run by a player."));
+            return 0;
+        }
+        if (!AutoSprintController.INSTANCE.start(player, direction)) {
+            source.sendFailure(Component.literal("[Minecraft-AI] Auto sprint needs the Minecraft-AI client mod and could not start Baritone."));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] Auto-sprinting " + direction.name().toLowerCase(java.util.Locale.ROOT)
+                + ". Use /minecraft-ai autosprint stop to stop."), false);
+        return 1;
+    }
+
+    private static int stopAutoSprint(CommandSourceStack source) {
+        ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendFailure(Component.literal("[Minecraft-AI] Auto sprint must be stopped by the player using it."));
+            return 0;
+        }
+        boolean stopped = AutoSprintController.INSTANCE.stop(player);
+        source.sendSuccess(() -> Component.literal(stopped
+                ? "[Minecraft-AI] Auto sprint stopped; first-person view restored."
+                : "[Minecraft-AI] Auto sprint was not running; first-person view restored."), false);
+        return 1;
+    }
+
+    /** Sends the issuing player to a standable cell by their vanilla last-death marker, including another dimension. */
+    private static int returnToLastDeath(CommandSourceStack source) {
+        ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendFailure(Component.literal("[Minecraft-AI] Returning to a death location must be run by a player."));
+            return 0;
+        }
+        GlobalPos death = player.getLastDeathLocation().orElse(null);
+        if (death == null) {
+            source.sendFailure(Component.literal("[Minecraft-AI] No last death location is available."));
+            return 0;
+        }
+        ServerLevel level = source.getServer().getLevel(death.dimension());
+        if (level == null) {
+            source.sendFailure(Component.literal("[Minecraft-AI] Your last death dimension is not available."));
+            return 0;
+        }
+        BlockPos origin = death.pos();
+        // Never use the raw death cell: it can be lava (or otherwise unsafe). A nearby, dry,
+        // standable position also makes a cross-dimension return behave like a normal teleport.
+        BlockPos destination = Standability.isStandable(level, origin) ? origin
+                : Standability.findNearestStandable(level, origin, 8, 128, 32).orElse(null);
+        if (destination == null) {
+            source.sendFailure(Component.literal("[Minecraft-AI] No safe position was found near your last death."));
+            return 0;
+        }
+        player.teleportTo(level, destination.getX() + 0.5D, destination.getY(), destination.getZ() + 0.5D,
+                java.util.Set.of(), player.getYRot(), player.getXRot(), true);
+        source.sendSuccess(() -> Component.literal("[Minecraft-AI] Returned near your last death in "
+                + level.dimension().identifier() + "."), false);
+        return 1;
     }
 
     private static int recallCompanions(CommandSourceStack source) {

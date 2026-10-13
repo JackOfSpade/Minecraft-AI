@@ -66,8 +66,11 @@ final class AutomaticLightingSourceContractTest {
         assertTrue(watcher.contains("skipAutoLightOnSurface(bot, now, \"dark_area_light\")"));
         assertTrue(watcher.contains("auto_light_skipped"));
         assertFalse(watcher.contains("new LightAreaTask("), "automatic lighting must use LightAreaTask.automatic");
-        // The two idle reflexes above, and the dark-trap answer (a trap cell is under a roof by definition, see isDarkTrapCell).
-        assertEquals(3, count(watcher, "LightAreaTask.automatic(8, 8)"));
+        // Only the two genuinely idle reflexes own an area-light task. A dark-trap torch is
+        // interaction-range only, so it cannot pause the work that brought the bot there.
+        assertEquals(2, count(watcher, "LightAreaTask.automatic(8, 8)"));
+        assertTrue(watcher.contains("AutomaticLighting.tryPlaceTorchAtFeetPassively(bot)"));
+        assertTrue(watcher.contains("dark_trap_passive_light"));
         assertEquals(3, count(watcher, "night.autoLight()") + count(watcher, "night().autoLight()"),
                 "night.autoLight gates every automatic reflex");
         assertTrue(watcher.contains("return !SurfaceCheck.isOnSurface(world, feet);"),
@@ -83,17 +86,17 @@ final class AutomaticLightingSourceContractTest {
     }
 
     @Test
-    void activeMiningLightingUsesNativeSpawnRulesAndNeverBlindlyPlacesAtFeet() throws IOException {
+    void activeMiningLightingUsesNativeSpawnRulesAndOnlyPlacesAtFeetWithProof() throws IOException {
         String automatic = read(MAIN.resolve("task/AutomaticLighting.java"));
         assertTrue(automatic.contains("monsterSpawnBlockLightLimit()"));
         assertTrue(automatic.contains("monsterSpawnLightTest().getMaxValue()"));
         assertTrue(automatic.contains("SurfaceCheck.isOnSurface"));
         assertTrue(automatic.contains("BuildAction.canAcceptPlacementAt"));
-        assertTrue(automatic.contains("darkestReachableFloor"));
-        assertFalse(automatic.contains("VERTICAL_SCAN_RADIUS"),
-                "darkest-reachable selection must not arbitrarily exclude reachable upper/lower ledges");
-        assertTrue(automatic.contains("for (int dy = -radius; dy <= radius; dy++)"),
-                "the full interaction-sized vertical reach must be considered");
+        assertTrue(automatic.contains("tryPlaceTorchAtFeet"));
+        assertTrue(automatic.contains("world.getBlockState(feet).isAir() || !BuildAction.canAcceptPlacementAt(bot, feet)"),
+                "the bot's own floor is the only automatic candidate, with a real vanilla placement proof");
+        assertFalse(automatic.contains("darkestReachableFloor") || automatic.contains("ObservableWorldQuery"),
+                "automatic lighting must not scan neighbouring cells");
         int usingItemGuard = automatic.indexOf("if (bot.isUsingItem())");
         int equipTorch = automatic.indexOf("InventoryAction.equipFromSlot");
         assertTrue(usingItemGuard >= 0 && equipTorch > usingItemGuard,
@@ -101,7 +104,11 @@ final class AutomaticLightingSourceContractTest {
         assertTrue(automatic.contains("miningTorchAutomationEnabled")
                         && automatic.contains("mining().placeTorches()"),
                 "active mining must retain its dedicated torch-policy switch");
-        assertFalse(automatic.contains("night().autoLight()"),
+        int activeLightingStart = automatic.indexOf("static Placement tryPlaceTorchAtFeet(AIPlayerEntity bot)");
+        int passiveLightingStart = automatic.indexOf("static Placement tryPlaceTorchAtFeetPassively(AIPlayerEntity bot, int serverTick)");
+        assertTrue(activeLightingStart >= 0 && passiveLightingStart > activeLightingStart,
+                "the active-mining torch helper must remain separately auditable from the passive reflex");
+        assertFalse(automatic.substring(activeLightingStart, passiveLightingStart).contains("night().autoLight()"),
                 "the idle night-light setting must not disable active mining torches");
 
         String descend = read(MAIN.resolve("task/DescendToYTask.java"));
@@ -111,7 +118,7 @@ final class AutomaticLightingSourceContractTest {
         assertTrue(descendLightingStart >= 0 && descendLightingEnd > descendLightingStart,
                 "the descent torch boundary must remain a locally auditable helper");
         String descendLighting = descend.substring(descendLightingStart, descendLightingEnd);
-        assertTrue(descendLighting.contains("AutomaticLighting.tryPlaceDarkestReachable"));
+        assertTrue(descendLighting.contains("AutomaticLighting.tryPlaceTorchAtFeet"));
         assertTrue(descendLighting.contains("AutomaticLighting.miningTorchAutomationEnabled"));
         assertTrue(descendLighting.contains("miner.target() != null")
                         && descendLighting.contains("isMiningIdle()")
@@ -131,7 +138,7 @@ final class AutomaticLightingSourceContractTest {
         assertTrue(valuableLightingStart >= 0 && valuableLightingEnd > valuableLightingStart,
                 "the valuables torch boundary must remain a locally auditable helper");
         String valuableLighting = valuables.substring(valuableLightingStart, valuableLightingEnd);
-        assertTrue(valuableLighting.contains("AutomaticLighting.tryPlaceDarkestReachable"));
+        assertTrue(valuableLighting.contains("AutomaticLighting.tryPlaceTorchAtFeet"));
         assertTrue(valuableLighting.contains("AutomaticLighting.miningTorchAutomationEnabled"));
         assertTrue(valuableLighting.contains("bot.isUsingItem()")
                         && valuableLighting.contains("beforeMining && bot.getActionPack().hasActiveActions()"),
@@ -177,7 +184,7 @@ final class AutomaticLightingSourceContractTest {
                 "an in-progress OreDig placement must retry without consuming its cadence");
 
         String obsidian = read(MAIN.resolve("task/CreateObsidianTask.java"));
-        assertTrue(obsidian.contains("AutomaticLighting.tryPlaceDarkestReachable"));
+        assertTrue(obsidian.contains("AutomaticLighting.tryPlaceTorchAtFeet"));
         assertTrue(obsidian.contains("AutomaticLighting.miningTorchAutomationEnabled"));
         assertFalse(obsidian.contains("combinedSearchLight"));
         int searchOwner = obsidian.indexOf("if (miner.target() == null && searchActionOwned(bot))");
@@ -196,7 +203,7 @@ final class AutomaticLightingSourceContractTest {
                 "obsidian SEARCH lighting must wait for mining, route, walk, and held-action owners");
         int lightingOwnerGuard = obsidian.indexOf("if (miner.target() != null || searchActionOwned(bot))",
                 lightingHelper);
-        int torchPlacement = obsidian.indexOf("AutomaticLighting.tryPlaceDarkestReachable", lightingHelper);
+        int torchPlacement = obsidian.indexOf("AutomaticLighting.tryPlaceTorchAtFeet", lightingHelper);
         assertTrue(lightingOwnerGuard > lightingHelper && torchPlacement > lightingOwnerGuard,
                 "the obsidian torch helper must reject a live miner, route, walk, or held action before it can equip a torch");
 
@@ -205,7 +212,7 @@ final class AutomaticLightingSourceContractTest {
 
         String genericMine = read(MAIN.resolve("task/MineTask.java"));
         assertTrue(genericMine.contains("maybePlaceAutomaticTorch"));
-        assertTrue(genericMine.contains("AutomaticLighting.tryPlaceDarkestReachable"));
+        assertTrue(genericMine.contains("AutomaticLighting.tryPlaceTorchAtFeet"));
         assertTrue(genericMine.contains("phase != Phase.SEARCHING")
                         && genericMine.contains("miner.target() != null"),
                 "generic block mining must only light at its own quiet search boundary");
@@ -234,7 +241,48 @@ final class AutomaticLightingSourceContractTest {
         int stripLightingStart = stripMine.indexOf("private void light(AIPlayerEntity bot)");
         String stripLighting = stripMine.substring(stripLightingStart,
                 stripMine.indexOf("    private void move(AIPlayerEntity bot)", stripLightingStart));
-        assertTrue(stripLighting.contains("AutomaticLighting.tryPlaceDarkestReachable"));
+        assertTrue(stripLighting.contains("AutomaticLighting.tryPlaceTorchAtFeet"));
         assertFalse(stripLighting.contains("BuildAction.placeBlockAt"));
+    }
+
+    @Test
+    void netherLightingRequiresARealLocalEnclosureNotTheWorldCeiling() throws IOException {
+        String automatic = read(MAIN.resolve("task/AutomaticLighting.java"));
+
+        assertTrue(automatic.contains("world.dimension() == Level.NETHER"));
+        assertTrue(automatic.contains("isEnclosedNetherSpace(world, pos)"));
+        assertTrue(automatic.contains("for (int dy = 1; dy <= 6; dy++)"),
+                "a nearby ceiling, rather than the distant Nether roof, is required");
+        assertTrue(automatic.contains("pos.north()") && automatic.contains("pos.south()")
+                        && automatic.contains("pos.east()") && automatic.contains("pos.west()"),
+                "a nearby side wall distinguishes a cave or corridor from exposed Nether terrain");
+        assertTrue(automatic.contains("The End has no comparable roof"),
+                "open End islands follow the normal surface rule; only naturally enclosed End spaces are lit");
+    }
+
+    @Test
+    void passiveLightingUsesAStableCadenceAndNeverTakesOverTaskMovementOrInventory() throws IOException {
+        String automatic = read(MAIN.resolve("task/AutomaticLighting.java"));
+        String coordinator = read(MAIN.resolve("task/BotTickCoordinator.java"));
+
+        assertTrue(automatic.contains("PASSIVE_CHECK_INTERVAL_TICKS = 20"));
+        assertTrue(automatic.contains("tryPlaceTorchAtFeetPassively(AIPlayerEntity bot, int serverTick)"));
+        assertTrue(automatic.contains("!actions.isPathExecutorIdle() || !actions.hasActiveActions()"),
+                "passive lighting may continue an existing route or use only a fully quiet boundary");
+        assertTrue(automatic.contains("!actions.isWalkToIdle() || !actions.isMiningIdle() || !actions.stepIdle()"),
+                "a direct walk, break, or step must retain exclusive ownership");
+        assertTrue(automatic.contains("inventory.setSelectedSlot(selectedSlot)")
+                        && automatic.contains("LookAction.setYawPitch(bot, yaw, pitch)"),
+                "the task's held slot and aim must be restored after a background placement");
+        assertTrue(automatic.contains("restoreInventorySwap && equippedSlot >= 0")
+                        && automatic.contains("inventory.getNonEquipmentItems().set(torchSlot, equippedStack)")
+                        && automatic.contains("inventory.getNonEquipmentItems().set(equippedSlot, sourceStack)"),
+                "a passive torch must reverse its exact full-hotbar swap before returning to the task");
+        assertTrue(coordinator.contains("AutomaticLighting.tryPlaceTorchAtFeetPassively(bot, tick);"));
+        assertTrue(coordinator.indexOf("ShieldGuard.INSTANCE.tickBot(server, bot);")
+                        < coordinator.indexOf("AutomaticLighting.tryPlaceTorchAtFeetPassively(bot, tick);")
+                        && coordinator.indexOf("AutomaticLighting.tryPlaceTorchAtFeetPassively(bot, tick);")
+                        < coordinator.indexOf("GoalExecutor.INSTANCE.tickBot(server, bot)"),
+                "passive lighting must yield to the shield and settle before goal ownership runs");
     }
 }

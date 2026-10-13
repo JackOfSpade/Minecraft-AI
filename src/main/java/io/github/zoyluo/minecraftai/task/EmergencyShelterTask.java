@@ -39,8 +39,14 @@ public final class EmergencyShelterTask extends AbstractTask {
     /** Four optional foundations, eight side cells, one roof support and one center roof. */
     public static final int MAX_PLACEMENT_BLOCKS = 14;
     private static final int NO_PROGRESS_LIMIT = 20;
+    /** A transient ray/pose refusal retries from a new safe anchor once before opening the shelter. */
+    private static final int BUILD_SITE_RETRY_LIMIT = 1;
+    /** Consecutive invisible-support failures before the current anchor is considered unsuitable. */
+    private static final int SUPPORT_FACE_FAILURES_BEFORE_RESITE = 3;
     private static final int ANCHOR_RECOVERY_LIMIT = 20;
     private static final int BUILD_LIMIT = 120;
+    /** At three hearts or less, cover must start now; a ten-block retreat is no longer survivable. */
+    static final float CRITICAL_IMMEDIATE_COVER_HEALTH = 6.0F;
     /** A shelter starts only after an actual escape leg has opened this much room. */
     private static final int PREBUILD_RETREAT_DISTANCE = 10;
     private static final int PREBUILD_RETREAT_LIMIT = 260;
@@ -137,6 +143,8 @@ public final class EmergencyShelterTask extends AbstractTask {
     private int dwellStartedElapsed;
     private int placed;
     private int lastProgressTick;
+    private int supportFaceFailures;
+    private int buildSiteRetries;
     private int phaseStartedElapsed;
     private int exitStartedElapsed;
     private int anchorRecoveryStartedElapsed;
@@ -171,6 +179,8 @@ public final class EmergencyShelterTask extends AbstractTask {
     private int consecutiveDaylightTicks;
     private int observationReseals;
     private EatTask holdEatTask;
+    /** One physical drink/throw at a time; food remains preferred while it can sustain regeneration. */
+    private HealingPotionTask holdHealingPotionTask;
     /**
      * Rescue lifecycle (spec: no-food/cry-for-help/rescue), all reset in {@link #onStart}, so a
      * later, separate emergency-shelter episode always starts this bookkeeping over from scratch.
@@ -184,6 +194,8 @@ public final class EmergencyShelterTask extends AbstractTask {
     private boolean recoveryReadyAnnounced;
     private final LivingEntity initiatingThreat;
     private final BlockPos rememberedThreatPos;
+    /** The hostile-facing side that must be sealed before ordinary foundations or other walls. */
+    private Direction urgentCoverDirection;
     private BlockPos retreatGoal;
     private boolean cleanupDebtRegistered;
     private Phase phase = Phase.BUILD;
@@ -259,6 +271,8 @@ public final class EmergencyShelterTask extends AbstractTask {
         dwellEgress = null;
         placed = 0;
         lastProgressTick = 0;
+        supportFaceFailures = 0;
+        buildSiteRetries = 0;
         phaseStartedElapsed = 0;
         exitStartedElapsed = -1;
         anchorRecoveryStartedElapsed = -1;
@@ -273,6 +287,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         consecutiveDaylightTicks = 0;
         observationReseals = 0;
         holdEatTask = null;
+        holdHealingPotionTask = null;
         waitingForRescue = false;
         criedForHelp = false;
         rescueResolvedAnnounced = false;
@@ -294,7 +309,25 @@ public final class EmergencyShelterTask extends AbstractTask {
         foundationPlaceTries = 0;
         foundationFailures = 0;
         foundationFailure = null;
+        urgentCoverDirection = null;
         if (initiatingThreat != null || rememberedThreatPos != null) {
+            Direction criticalCover = criticalCoverDirection(bot);
+            if (isCriticalImmediateCoverHealth(bot.getHealth())
+                    && criticalCover != null
+                    && canStartAtCurrentPose(bot)) {
+                // A bot at two or three hits from death cannot afford a path leg or the old
+                // all-foundations-first queue.  Keep a normal owned exit, but put the actual
+                // threat-side lower/upper wall immediately behind that exit's one prerequisite.
+                urgentCoverDirection = criticalCover;
+                phase = Phase.BUILD;
+                phaseStartedElapsed = 0;
+                BotLog.action(bot, "shelter_critical_immediate_cover",
+                        "hp", bot.getHealth(),
+                        "direction", urgentCoverDirection,
+                        "threat", rememberedThreatPos);
+                beginBuildAtCurrentPose(bot);
+                return;
+            }
             phase = Phase.RETREAT_TO_SAFE_ANCHOR;
             phaseStartedElapsed = 0;
             beginRetreatToSafeAnchor(bot);
@@ -320,14 +353,17 @@ public final class EmergencyShelterTask extends AbstractTask {
             failShelter(bot, "shelter_origin_not_centerable");
             return;
         }
-        initialSettlePending = true;
+        // The critical queue has to spend its first ticks on cover.  Every placement still runs
+        // the ordinary live collision/centering check, so this only avoids an unconditional
+        // settle delay before the threat-side wall.
+        initialSettlePending = urgentCoverDirection == null;
         settleRestWait = 0;
         // Capture this before the shelter itself adds a roof. Nearby no-leaves terrain height
         // keeps a shallow canopy or overhang in the surface-night transaction while the Y floor
         // excludes an open deep mine that happens to have a vertical view of the sky.
         surfaceShelter = isSurfaceShelterAnchor(bot, feet);
         shelterFeet = feet.immutable();
-        Optional<ShelterPlan> planned = planShelter(bot, shelterFeet);
+        Optional<ShelterPlan> planned = planShelter(bot, shelterFeet, urgentCoverDirection);
         if (planned.isEmpty()) {
             failShelter(bot, "shelter_no_owned_egress");
             return;
@@ -421,6 +457,24 @@ public final class EmergencyShelterTask extends AbstractTask {
             return null;
         }
         return initiatingThreat;
+    }
+
+    /** Picks the one cardinal side between this stable anchor and the factually observed threat. */
+    private Direction criticalCoverDirection(AIPlayerEntity bot) {
+        Vec3 source = initiatingThreat != null && initiatingThreat.isAlive()
+                ? initiatingThreat.position()
+                : rememberedThreatPos == null ? null : Vec3.atCenterOf(rememberedThreatPos);
+        if (source == null) {
+            return null;
+        }
+        Vec3 away = source.subtract(bot.position());
+        if (Math.abs(away.x) < 0.01D && Math.abs(away.z) < 0.01D) {
+            return null;
+        }
+        if (Math.abs(away.x) >= Math.abs(away.z)) {
+            return away.x >= 0.0D ? Direction.EAST : Direction.WEST;
+        }
+        return away.z >= 0.0D ? Direction.SOUTH : Direction.NORTH;
     }
 
     private boolean isSafeRetreatAnchor(AIPlayerEntity bot, LivingEntity pressure) {
@@ -572,10 +626,19 @@ public final class EmergencyShelterTask extends AbstractTask {
                 targets.poll();
                 rememberPlacement(bot, target);
                 placed++;
+                supportFaceFailures = 0;
                 lastProgressTick = elapsed;
                 break; // one physical placement per tick
             }
             lastFailure = result.reason();
+            if ("support_face_not_visible".equals(lastFailure)
+                    && ++supportFaceFailures >= SUPPORT_FACE_FAILURES_BEFORE_RESITE
+                    && restartAtAlternateBuildAnchor(bot, lastFailure)) {
+                return;
+            }
+            if (!"support_face_not_visible".equals(lastFailure)) {
+                supportFaceFailures = 0;
+            }
             // Every queue element is a prerequisite for the element after it: foundations precede
             // side feet, each side foot precedes its head, roofSupportBase precedes roofSupport,
             // and center roof is last. Retrying the head preserves that dependency graph; rotating
@@ -600,6 +663,58 @@ public final class EmergencyShelterTask extends AbstractTask {
         if (elapsed - lastProgressTick > NO_PROGRESS_LIMIT) {
             beginExit(bot, "shelter_unsealable:" + lastFailure);
         }
+    }
+
+    /**
+     * A strict face proof can fail on a valid but cramped ledge even though the shelter has ample
+     * blocks.  One incomplete, still-open attempt is allowed to relocate and rebuild; this avoids
+     * spending the whole no-progress window clicking the same obstructed ray while preserving the
+     * no-entombment rule for a substantially built shell.
+     */
+    private boolean restartAtAlternateBuildAnchor(AIPlayerEntity bot, String reason) {
+        if (buildSiteRetries >= BUILD_SITE_RETRY_LIMIT
+                || initiatingThreat == null && rememberedThreatPos == null
+                || ownedPlacements.size() > 1
+                || !hasPassableEnvelopeSide(bot)) {
+            return false;
+        }
+        buildSiteRetries++;
+        BotLog.action(bot, "shelter_build_anchor_retry",
+                "attempt", buildSiteRetries,
+                "reason", reason,
+                "anchor", shelterFeet,
+                "placed", placed);
+        targets.clear();
+        ownedPlacements.clear(); // at most one exposed foundation: no enclosure or exit debt exists
+        placed = 0;
+        supportFaceFailures = 0;
+        lastProgressTick = elapsed;
+        initialSettlePending = false;
+        settleRestWait = 0;
+        settleCount = 0;
+        foundationStage = FoundationStage.NONE;
+        foundationDirection = null;
+        foundationShifts = 0;
+        foundationPlaceTries = 0;
+        foundationFailures = 0;
+        foundationFailure = null;
+        elevatedForRoofSupport = false;
+        roofJumpAirborneSeen = false;
+        roofJumpTries = 0;
+        urgentCoverDirection = null;
+        shelterFeet = null;
+        roofSupport = null;
+        roofSupportBase = null;
+        egressFeet = null;
+        egressFailureTarget = null;
+        egressMotionFailures = 0;
+        retreatGoal = null;
+        dropMotion(bot);
+        bot.getActionPack().stopAll();
+        phase = Phase.RETREAT_TO_SAFE_ANCHOR;
+        phaseStartedElapsed = elapsed;
+        beginRetreatToSafeAnchor(bot);
+        return true;
     }
 
     /**
@@ -979,6 +1094,20 @@ public final class EmergencyShelterTask extends AbstractTask {
         if (!isRecoveredEnoughToExit(bot)) {
             announceRecoveryStatusIfDue(bot);
         }
+        // Recovery starts as soon as the envelope seals. The minimum HOLD/daylight wait protects
+        // the later exit, not the first recovery action. A sealed shelter spends its immediate
+        // healing potion before food, keeping the slower bite/natural-regeneration path for after
+        // instant health has done all it can.
+        if (tickFoodRescueState(bot)) {
+            return;
+        }
+        if (tickHoldHealingPotion(bot)) {
+            return;
+        }
+        if (tickHoldEating(bot)) {
+            return;
+        }
+        announceMissingRecoverySuppliesIfNeeded(bot);
         if (surfaceShelter) {
             if (!bot.level().isBrightOutside()) {
                 consecutiveDaylightTicks = 0;
@@ -989,20 +1118,6 @@ public final class EmergencyShelterTask extends AbstractTask {
                 return;
             }
         } else if (phaseAge() < MIN_HOLD_TICKS) {
-            return;
-        }
-        // A rescue in progress (or a healing run that just stalled for lack of food) is resolved
-        // before the ordinary eating primitive gets a turn, so a just-delivered food item is
-        // acknowledged on the same tick that it lets eating resume, and a genuinely stalled bot
-        // never wastes a tick asking EatTask to work with an empty inventory.
-        if (tickFoodRescueState(bot)) {
-            return;
-        }
-        // Healing belongs inside the sealed safety transaction. Scheduling EatTask only after the
-        // door opens exposes a critical-health bot to the exact hostile the shelter was built for.
-        // Tick the ordinary physical eating primitive here so inventory selection, use duration,
-        // food consumption and vanilla regeneration all remain survival-authentic.
-        if (tickHoldEating(bot)) {
             return;
         }
         // This is a recovery shelter, not a night-time camp.  Do not reopen merely because a
@@ -1021,8 +1136,9 @@ public final class EmergencyShelterTask extends AbstractTask {
             return;
         }
         lastRecoveryStatusElapsed = elapsed;
-        boolean waitingForFood = waitingForRescue || isHealingStalledWithoutFood(
-                bot.getHealth(), bot.getMaxHealth(), InventoryAction.hasFood(bot), canRegenerateNaturally(bot));
+        boolean waitingForFood = waitingForRescue || isHealingStalledWithoutRecoverySupply(
+                bot.getHealth(), bot.getMaxHealth(), InventoryAction.hasFood(bot),
+                HealingPotionTask.hasHealingPotion(bot), canRegenerateNaturally(bot));
         String message = recoveryStatusMessage(bot.getHealth(), bot.getMaxHealth(),
                 bot.getFoodData().getFoodLevel(), waitingForFood);
         BrainCoordinator.INSTANCE.sendBotReply(bot, message);
@@ -1039,7 +1155,7 @@ public final class EmergencyShelterTask extends AbstractTask {
         String status = "Shelter status: " + (int) Math.ceil(Math.max(0.0F, health)) + "/"
                 + (int) Math.ceil(Math.max(0.0F, maxHealth)) + " HP, hunger " + foodLevel + "/20.";
         if (waitingForFood) {
-            return status + " I need food before I can keep healing.";
+            return status + " I need food or a healing potion before I can keep healing.";
         }
         if (health >= maxHealth) {
             return status + " Fully healed; I am waiting for a safe moment to leave and resume defense.";
@@ -1061,33 +1177,27 @@ public final class EmergencyShelterTask extends AbstractTask {
      */
     private boolean tickFoodRescueState(AIPlayerEntity bot) {
         boolean hasFoodAvailable = InventoryAction.hasFood(bot);
-        if (waitingForRescue && hasFoodAvailable) {
+        boolean hasHealingPotion = HealingPotionTask.hasHealingPotion(bot);
+        if (waitingForRescue && (hasFoodAvailable || hasHealingPotion)) {
             waitingForRescue = false;
             BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot",
-                    "Got the food, thank you! I will keep healing now.");
-            BotLog.action(bot, "shelter_rescue_food_received",
-                    "health", bot.getHealth(), "food", bot.getFoodData().getFoodLevel());
-            return false; // let the ordinary eating primitive pick it up later this same tick
+                    "Got recovery supplies, thank you! I will keep healing now.");
+            BotLog.action(bot, "shelter_rescue_supplies_received",
+                    "health", bot.getHealth(), "food", bot.getFoodData().getFoodLevel(),
+                    "healing_potion", hasHealingPotion);
+            return false; // let the ordinary recovery primitive use it later this same tick
         }
-        if (!isHealingStalledWithoutFood(bot.getHealth(), bot.getMaxHealth(), hasFoodAvailable,
+        if (!isHealingStalledWithoutRecoverySupply(bot.getHealth(), bot.getMaxHealth(), hasFoodAvailable,
+                hasHealingPotion,
                 canRegenerateNaturally(bot))) {
             return false;
         }
+        announceMissingRecoverySuppliesIfNeeded(bot);
         if (shouldAbandonRescueWaitAndFight(bot.getHealth(), bot.getMaxHealth())) {
             beginOutOfFoodExit(bot);
             return true;
         }
         waitingForRescue = true;
-        if (!criedForHelp) {
-            criedForHelp = true;
-            BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot",
-                    "I'm out of food and stuck healing at " + (int) bot.getHealth() + "/"
-                            + (int) bot.getMaxHealth() + " HP inside my emergency shelter. "
-                            + "Please bring me food: break one wall block, toss the food in, "
-                            + "then seal the block back up.");
-            BotLog.action(bot, "shelter_rescue_needed",
-                    "health", bot.getHealth(), "anchor", shelterFeet);
-        }
         return true;
     }
 
@@ -1114,6 +1224,47 @@ public final class EmergencyShelterTask extends AbstractTask {
         }
         holdEatTask = null;
         return true;
+    }
+
+    /** A sealed shelter uses every carried Instant Health potion before it starts the slower food recovery. */
+    private boolean tickHoldHealingPotion(AIPlayerEntity bot) {
+        if (holdHealingPotionTask == null) {
+            if (bot.getHealth() >= bot.getMaxHealth()
+                    || !HealingPotionTask.hasHealingPotion(bot)) {
+                return false;
+            }
+            holdHealingPotionTask = new HealingPotionTask();
+            holdHealingPotionTask.start(bot);
+        }
+        holdHealingPotionTask.tick(bot);
+        if (holdHealingPotionTask.state() == TaskState.RUNNING) {
+            return true;
+        }
+        if (holdHealingPotionTask.state() == TaskState.FAILED) {
+            BotLog.action(bot, "shelter_healing_potion_failed",
+                    "reason", holdHealingPotionTask.failureReason());
+        }
+        holdHealingPotionTask = null;
+        return true;
+    }
+
+    /** Tell the player at once when a wounded sheltered bot has no carried way to recover further. */
+    private void announceMissingRecoverySuppliesIfNeeded(AIPlayerEntity bot) {
+        if (criedForHelp
+                || bot.getHealth() >= bot.getMaxHealth()
+                || InventoryAction.hasFood(bot)
+                || HealingPotionTask.hasHealingPotion(bot)) {
+            return;
+        }
+        if (!criedForHelp) {
+            criedForHelp = true;
+            BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot",
+                    "I'm hurt inside my emergency shelter and have no food or healing potions (drinkable or splash). "
+                            + "Please break one wall block, toss food or a healing potion in, then seal it back up.");
+            BotLog.action(bot, "shelter_rescue_needed",
+                    "health", bot.getHealth(), "max_health", bot.getMaxHealth(), "anchor", shelterFeet,
+                    "food", bot.getFoodData().getFoodLevel());
+        }
     }
 
     static boolean shouldStartHoldEating(float health, int foodLevel) {
@@ -1180,6 +1331,16 @@ public final class EmergencyShelterTask extends AbstractTask {
                                                boolean hasFoodAvailable,
                                                boolean canRegenerate) {
         return !hasFoodAvailable && health < maxHealth && !canRegenerate;
+    }
+
+    /** A healing potion is a valid alternative to food once natural regeneration has stopped. */
+    static boolean isHealingStalledWithoutRecoverySupply(float health,
+                                                          float maxHealth,
+                                                          boolean hasFoodAvailable,
+                                                          boolean hasHealingPotion,
+                                                          boolean canRegenerate) {
+        return !hasHealingPotion && isHealingStalledWithoutFood(
+                health, maxHealth, hasFoodAvailable, canRegenerate);
     }
 
     /** Vanilla natural regeneration needs a hunger bar of at least 18 (and the gamerule on). */
@@ -1922,6 +2083,10 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private void cancelHoldEating(AIPlayerEntity bot, String reason) {
+        if (holdHealingPotionTask != null) {
+            holdHealingPotionTask.cancel(bot, reason);
+            holdHealingPotionTask = null;
+        }
         if (holdEatTask != null) {
             holdEatTask.cancel(bot, reason);
             holdEatTask = null;
@@ -2079,6 +2244,18 @@ public final class EmergencyShelterTask extends AbstractTask {
     }
 
     private static Optional<ShelterPlan> planShelter(AIPlayerEntity bot, BlockPos feet) {
+        return planShelter(bot, feet, null);
+    }
+
+    /**
+     * The normal plan front-loads every possible foundation so its durable egress proof is
+     * complete before a wall.  In the critically-low-health branch, preserve the selected exit's
+     * single proof but then seal the hostile-facing side immediately; the remaining foundations
+     * and walls retain their normal dependency order.
+     */
+    private static Optional<ShelterPlan> planShelter(AIPlayerEntity bot,
+                                                      BlockPos feet,
+                                                      Direction urgentCoverDirection) {
         BlockPos head = feet.above();
         BlockPos roof = head.above();
         // The eight side cells are only diagonal to the center roof. In strict survival they can
@@ -2092,21 +2269,49 @@ public final class EmergencyShelterTask extends AbstractTask {
             return Optional.empty();
         }
         List<BlockPos> targets = new ArrayList<>(MAX_PLACEMENT_BLOCKS);
-        // Only an open side whose landing support is missing needs a foundation. Put the planned
-        // exit support first so no envelope block can be placed until the task has physically
-        // proved that it owns a supported way back out.
-        addFoundationIfNeeded(bot, targets, egressFeet);
-        for (Direction direction : HORIZONTAL) {
-            BlockPos side = feet.relative(direction);
-            if (!side.equals(egressFeet)) {
-                addFoundationIfNeeded(bot, targets, side);
+        if (urgentCoverDirection != null) {
+            // Keep the eventual doorway physically viable before enclosing anything, then spend
+            // the next two placements on the side that blocks the observed attack direction.
+            addFoundationIfNeeded(bot, targets, egressFeet);
+            for (Direction direction : HORIZONTAL) {
+                if (direction != urgentCoverDirection) {
+                    continue;
+                }
+                BlockPos side = feet.relative(direction);
+                if (!side.equals(egressFeet)) {
+                    addFoundationIfNeeded(bot, targets, side);
+                }
+                targets.add(side.immutable());
+                targets.add(side.above().immutable());
             }
-        }
-        // Build the envelope from the ground up. Keeping the center roof last prevents an earlier
-        // failed target from leaving the player under a roof that can no longer be supported.
-        for (Direction direction : HORIZONTAL) {
-            targets.add(feet.relative(direction).immutable());
-            targets.add(head.relative(direction).immutable());
+            for (Direction direction : HORIZONTAL) {
+                if (direction == urgentCoverDirection) {
+                    continue;
+                }
+                BlockPos side = feet.relative(direction);
+                if (!side.equals(egressFeet)) {
+                    addFoundationIfNeeded(bot, targets, side);
+                }
+                targets.add(side.immutable());
+                targets.add(side.above().immutable());
+            }
+        } else {
+            // Only an open side whose landing support is missing needs a foundation. Put the planned
+            // exit support first so no envelope block can be placed until the task has physically
+            // proved that it owns a supported way back out.
+            addFoundationIfNeeded(bot, targets, egressFeet);
+            for (Direction direction : HORIZONTAL) {
+                BlockPos side = feet.relative(direction);
+                if (!side.equals(egressFeet)) {
+                    addFoundationIfNeeded(bot, targets, side);
+                }
+            }
+            // Build the envelope from the ground up. Keeping the center roof last prevents an earlier
+            // failed target from leaving the player under a roof that can no longer be supported.
+            for (Direction direction : HORIZONTAL) {
+                targets.add(feet.relative(direction).immutable());
+                targets.add(head.relative(direction).immutable());
+            }
         }
         if (!isSealed(bot, roof)) {
             targets.add(roofSupport);
@@ -2748,6 +2953,10 @@ public final class EmergencyShelterTask extends AbstractTask {
      */
     static boolean hasMaterialsForEmergencyRetreat(AIPlayerEntity bot) {
         return countShelterBlocks(bot) >= 10;
+    }
+
+    static boolean isCriticalImmediateCoverHealth(float health) {
+        return health > 0.0F && health <= CRITICAL_IMMEDIATE_COVER_HEALTH;
     }
 
     /**

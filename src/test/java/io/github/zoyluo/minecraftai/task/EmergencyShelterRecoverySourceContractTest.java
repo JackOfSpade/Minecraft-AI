@@ -123,6 +123,15 @@ final class EmergencyShelterRecoverySourceContractTest {
                 "the recovery-complete transition must tell the player before opening the exit");
         assertTrue(shelter.contains("Fully healed and ready. Opening my shelter now;"),
                 "the readiness message should explain both exit and the return to defense");
+        int hold = shelter.indexOf("private void tickHold(AIPlayerEntity bot)");
+        int foodRescue = shelter.indexOf("if (tickFoodRescueState(bot))", hold);
+        int eat = shelter.indexOf("if (tickHoldEating(bot))", hold);
+        int potion = shelter.indexOf("if (tickHoldHealingPotion(bot))", hold);
+        int daylightGate = shelter.indexOf("if (surfaceShelter)", hold);
+        assertTrue(hold >= 0 && foodRescue > hold && potion > foodRescue && eat > potion
+                        && daylightGate > eat,
+                "sealed-shelter recovery must use Instant Health potions before food, and both before "
+                        + "a night-time/daylight hold gate can return early");
     }
 
     @Test
@@ -185,6 +194,35 @@ final class EmergencyShelterRecoverySourceContractTest {
         String anchorRecovery = shelter.substring(recover, failDisplaced);
         assertTrue(anchorRecovery.contains("elapsed - anchorRecoveryStartedElapsed > ANCHOR_RECOVERY_LIMIT"),
                 "anchor-return attempts retain their one aggregate recovery limit");
+    }
+
+    @Test
+    void crampedTerrainGetsOneAlternateAnchorBeforeShelterGivesUp() throws IOException {
+        String shelter = read("task/EmergencyShelterTask.java");
+
+        assertTrue(shelter.contains("BUILD_SITE_RETRY_LIMIT = 1"));
+        assertTrue(shelter.contains("SUPPORT_FACE_FAILURES_BEFORE_RESITE = 3"));
+        assertTrue(shelter.contains("restartAtAlternateBuildAnchor(bot, lastFailure)"));
+        assertTrue(shelter.contains("shelter_build_anchor_retry"));
+        assertTrue(shelter.contains("ownedPlacements.size() > 1")
+                        && shelter.contains("hasPassableEnvelopeSide(bot)"),
+                "only an early, still-open shelter may relocate; a substantial shell keeps its exit-debt safety boundary");
+    }
+
+    @Test
+    void criticallyInjuredBotBuildsThreatSideCoverBeforeRetreatOrUnrelatedFoundations() throws IOException {
+        String shelter = read("task/EmergencyShelterTask.java");
+
+        assertTrue(shelter.contains("CRITICAL_IMMEDIATE_COVER_HEALTH = 6.0F"));
+        assertTrue(shelter.contains("shelter_critical_immediate_cover"));
+        assertTrue(shelter.contains("criticalCoverDirection(bot)"));
+        assertTrue(shelter.contains("planShelter(bot, shelterFeet, urgentCoverDirection)"));
+        assertTrue(shelter.contains("if (urgentCoverDirection != null)"));
+        int urgentPlan = shelter.indexOf("if (urgentCoverDirection != null)");
+        int urgentFoot = shelter.indexOf("targets.add(side.immutable());", urgentPlan);
+        int urgentHead = shelter.indexOf("targets.add(side.above().immutable());", urgentFoot);
+        assertTrue(urgentPlan >= 0 && urgentFoot > urgentPlan && urgentHead > urgentFoot,
+                "the hostile-facing foot/head wall must be queued together directly after its own prerequisite");
     }
 
     private static String read(String relative) throws IOException {

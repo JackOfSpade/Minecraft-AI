@@ -11,6 +11,7 @@ import io.github.zoyluo.minecraftai.action.MaterialPalette;
 import io.github.zoyluo.minecraftai.action.MiningSafety;
 import io.github.zoyluo.minecraftai.action.ToolSelector;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
+import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.craft.CraftingHelper;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -32,6 +33,7 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
@@ -39,23 +41,26 @@ import net.minecraft.world.level.block.state.BlockState;
  * It is what a bot stuck in the dark does when it has nothing to light the cell with and cannot be
  * teleported out ({@link DangerWatcher}): climb one block per step, a block forward and a block up,
  * until the cell it stands in is no longer a dark trap, which is any cell with light enough to spawn
- * nothing and any cell under open sky ({@link DangerWatcher#isDarkTrapCell}). The surface is never
- * lit; it is simply where the stair ends.
+ * nothing and any cell under open sky ({@link DangerWatcher#isDarkTrapCell}). The same guarded
+ * stair can also be explicitly asked to reach open sky. The surface is never lit; it is simply
+ * where that stair ends.
  *
  * <p>The stair is {@link OreClimb}'s rise, repeated: each step opens the cell over the bot's head and
  * the landing with its head cell, and lands on a cell that was never dug, so it always has a floor
  * and the way back down is the stair itself. A rise needs a wall to start in, so a bot standing in
  * the middle of a room first walks to the nearest wall it can see. A step is opened only when what
  * the bot can see allows it ({@link StairDig}: no fluid or falling block over, beside or in the
- * cells, nothing a bot may not dig, no player standing on it); a heading that is refused is turned
- * from, to the right, then the left, then back, and the task ends when all four are. Every rise
+ * cells, nothing a bot may not dig, no player standing on it). A falling block is the one exception:
+ * the bot first backs up one proven stair cell, clears the bottom of that falling column from the
+ * side, waits for the column to settle, and only then chooses its next rise. A heading that is
+ * refused is turned from, to the right, then the left, then back, and the task ends when all four are. Every rise
  * gains a block, and a walk to a wall never goes back onto a cell the bot has stood in since the
  * last rise, so it cannot go in circles; it ends at the build limit if nothing else stops it.</p>
  *
- * <p>Nothing here knows where the sky is. Like a player in the dark it digs up, and what it learns on
- * the way (an open cave, a lit cell, the roof) is only what it sees. The one thing it does with what
- * it sees is to dig toward the brightest thing in view ({@link DigOutBearing}), when something is
- * brighter than the cell it stands in.</p>
+ * <p>Like a player in the dark it digs upward and learns terrain as it opens it. The ordinary
+ * dark-trap form can finish in a safe lit cave; the explicit surface form uses the same observed
+ * stair but does not stop until its current column is open to the sky. In either form it favors a
+ * brighter direction already in view ({@link DigOutBearing}).</p>
  *
  * <p><b>A flow.</b> Opening a cell can show a lava or water cell that was hidden behind it, and the fluid
  * comes in through the opening. Like a player the bot puts a block it carries into that cell (the one
@@ -87,6 +92,15 @@ public final class DigOutTask extends AbstractTask {
     static final String SEALED_FLOW = "sealed_flow";
     /** Start of the reason a task ends with when a flow could not be closed: {@code dig_out_flow_unsealed:<why>}. */
     static final String FLOW_UNSEALED = "dig_out_flow_unsealed";
+    /** Give vanilla gravity a few game ticks to replace the bottom block of a cleared sand/gravel column. */
+    private static final int GRAVITY_SETTLE_TICKS = 3;
+    /** A column can hold several falling blocks, but an unbounded collapse must still not monopolize the task. */
+    private static final int MAX_GRAVITY_CLEAR_ATTEMPTS = 16;
+    /** One torch covers the next part of an upward stair without spending one on every landing. */
+    private static final int TORCH_RISE_INTERVAL = 6;
+
+    /** True only for a player-requested excavation; emergency dark-trap recovery may finish in a lit cave. */
+    private final boolean requireSurface;
 
     private final BlockMiner miner = new BlockMiner();
     /** The steps that were started and did not land, each with the reason: never tried again from the same cell. */
@@ -125,10 +139,34 @@ public final class DigOutTask extends AbstractTask {
     private StairDig.Refusal pendingFlow;
     /** A sealed flow's glow is not an escape: make at least one other rise before accepting the ordinary dark-trap check. */
     private int riseBeforeFlowCanFinish;
+    /** The observed falling column being cleared only from a stance outside that column, or null. */
+    private GravityClearance gravityClearance;
+    /** The last upward landing where this task successfully placed its own deterministic torch. */
+    private int lastTorchY = Integer.MIN_VALUE;
+    /** A no-op or refused torch probe is not repeated until the stair reaches a different landing. */
+    private int lastTorchCheckY = Integer.MIN_VALUE;
     /** The pickaxe being made, or null. */
     private CraftTask toolCraft;
     /** Whether a pickaxe was made or found impossible to make: it is tried once. */
     private boolean toolSettled;
+
+    /** Emergency dark-trap escape: a sufficiently lit, safe cave is an acceptable result. */
+    public DigOutTask() {
+        this(false);
+    }
+
+    private DigOutTask(boolean requireSurface) {
+        this.requireSurface = requireSurface;
+    }
+
+    /**
+     * Player-requested upward excavation. It deliberately reuses the guarded stair/flow logic
+     * rather than mining a vertical shaft: every rise has a preserved floor, refuses fluids, clears
+     * an observed falling column only from the side, and uses only cells the bot can currently observe.
+     */
+    public static DigOutTask toSurface() {
+        return new DigOutTask(true);
+    }
 
     @Override
     public String name() {
@@ -137,7 +175,8 @@ public final class DigOutTask extends AbstractTask {
 
     @Override
     public String describe() {
-        return "Digging a stair up out of the dark" + (startCell == null ? "" : " from " + startCell.toShortString());
+        return (requireSurface ? "Digging a safe stair to the surface" : "Digging a stair up out of the dark")
+                + (startCell == null ? "" : " from " + startCell.toShortString());
     }
 
     @Override
@@ -162,7 +201,8 @@ public final class DigOutTask extends AbstractTask {
         heading = bot.getDirection();
         trail.add(startCell);
         resetMiner(bot);
-        BotLog.action(bot, "dig_out_started", "at", startCell.toShortString(), "heading", heading.getSerializedName());
+        BotLog.action(bot, "dig_out_started", "at", startCell.toShortString(), "heading", heading.getSerializedName(),
+                "target", requireSurface ? "surface" : "safe_light");
         takeBearing(bot, bot.level(), startCell);
     }
 
@@ -187,8 +227,12 @@ public final class DigOutTask extends AbstractTask {
         if (checkFreshOpenings(bot, feet)) {
             return;
         }
-        if (!DangerWatcher.isDarkTrapCell(world, feet) && risen >= riseBeforeFlowCanFinish) {
-            BotLog.action(bot, "dig_out_done", "at", feet.toShortString(), "risen", risen);
+        if (tickGravityClearance(bot, world, feet)) {
+            return;
+        }
+        if (reachedExit(world, feet) && risen >= riseBeforeFlowCanFinish) {
+            BotLog.action(bot, "dig_out_done", "at", feet.toShortString(), "risen", risen,
+                    "target", requireSurface ? "surface" : "safe_light");
             complete();
             return;
         }
@@ -202,6 +246,9 @@ public final class DigOutTask extends AbstractTask {
         }
         if (toolCraft != null) {
             craftTool(bot);
+            return;
+        }
+        if (maybePlaceTorch(bot, feet)) {
             return;
         }
         if (feet.getY() + RISE_HEAD_CELLS > world.getMaxY()) {
@@ -229,6 +276,10 @@ public final class DigOutTask extends AbstractTask {
                     closeFlow(bot, feet, pendingFlow);
                     return;
                 }
+                if (refusal != null && MiningSafety.GRAVITY.equals(refusal.reason())
+                        && beginGravityClearance(bot, world, feet, move, refusal)) {
+                    return;
+                }
                 why = refusal != null ? refusal.reason() : touchesSealedCell(feet, move) ? SEALED_FLOW : null;
             }
             if (why == null) {
@@ -252,6 +303,11 @@ public final class DigOutTask extends AbstractTask {
             return;
         }
         end(bot, "dig_out_blocked:" + lastRockRefusal);
+    }
+
+    /** The surface-only variant cannot stop merely because a deep cave happens to be bright. */
+    private boolean reachedExit(ServerLevel world, BlockPos feet) {
+        return requireSurface ? SurfaceCheck.isOnSurface(world, feet) : !DangerWatcher.isDarkTrapCell(world, feet);
     }
 
     /** Opens the next closed cell of {@code move}, or climbs onto its landing once every cell is open. */
@@ -286,12 +342,184 @@ public final class DigOutTask extends AbstractTask {
         settleMiner(bot);
     }
 
+    // ---- falling blocks ---------------------------------------------------------------------------------------------
+
+    /**
+     * Begins a local gravity recovery instead of giving up on the whole stair.  The ordinary
+     * {@link MiningSafety} verdict remains strict for every other digger; only this stair knows
+     * its own proven way back down and can therefore clear a falling column without standing
+     * beneath it.
+     */
+    private boolean beginGravityClearance(AIPlayerEntity bot, ServerLevel world, BlockPos feet,
+                                          OreClimb.Move move, StairDig.Refusal refusal) {
+        BlockPos falling = observedFallingBlock(bot, world, refusal.cell());
+        if (falling == null) {
+            return false;
+        }
+        BlockPos landing = OreClimb.landing(feet, move);
+        gravityClearance = new GravityClearance(falling, feet, landing);
+        BotLog.action(bot, "dig_out_gravity_detected", "at", feet.toShortString(),
+                "falling", falling.toShortString(), "landing", landing.toShortString());
+        return tickGravityClearance(bot, world, feet);
+    }
+
+    /**
+     * Keeps the bot out of the fall column, breaks only its currently settled bottom block, and
+     * waits for vanilla gravity before returning control to the normal stair selector.
+     */
+    private boolean tickGravityClearance(AIPlayerEntity bot, ServerLevel world, BlockPos feet) {
+        GravityClearance clearance = gravityClearance;
+        if (clearance == null) {
+            return false;
+        }
+        if (clearance.settleTicks > 0) {
+            clearance.settleTicks--;
+            return true;
+        }
+        if (!safeGravityStance(bot, world, feet, clearance.falling)) {
+            BlockPos stance = findGravityClearanceStance(bot, world, feet, clearance.falling);
+            if (stance != null) {
+                WalkedStep.Kind kind = WalkedStepRules.walkKindFor(stance.getY() - feet.getY());
+                if (kind != null) {
+                    step(bot, world, feet, stance, kind, false);
+                    return true;
+                }
+            }
+            // A fall may still be settling into this column.  Wait a short, bounded window before
+            // treating this exact heading as unavailable and letting the normal turn order choose
+            // another observed stair direction.
+            if (++clearance.noStanceTicks <= GRAVITY_SETTLE_TICKS) {
+                return true;
+            }
+            failGravityClearance(bot, clearance, "no_safe_side");
+            return false;
+        }
+
+        BlockState state = world.getBlockState(clearance.falling);
+        if (!(state.getBlock() instanceof FallingBlock)) {
+            // A stack can schedule its next lower block after the first is removed.  Three clear
+            // observations are enough to let that update happen without guessing at unseen blocks.
+            if (++clearance.clearTicks < GRAVITY_SETTLE_TICKS) {
+                return true;
+            }
+            BotLog.action(bot, "dig_out_gravity_cleared", "falling", clearance.falling.toShortString(),
+                    "breaks", clearance.breaks, "at", feet.toShortString());
+            gravityClearance = null;
+            return false;
+        }
+        clearance.clearTicks = 0;
+        if (clearance.breaks >= MAX_GRAVITY_CLEAR_ATTEMPTS) {
+            failGravityClearance(bot, clearance, "too_many_falling_blocks");
+            return false;
+        }
+        if (!bot.onGround()) {
+            return true;
+        }
+        ToolSelector.equipBestTool(bot, state, false);
+        String refusal = BreakEffort.refusal(bot, world, clearance.falling);
+        if (refusal != null) {
+            failGravityClearance(bot, clearance, "break_refused:" + refusal);
+            return false;
+        }
+        miner.naturalTerrainOnly(true);
+        miner.swordsMine(false);
+        miner.begin(bot, clearance.falling);
+        clearance.breaks++;
+        BotLog.action(bot, "dig_out_gravity_clear", "falling", clearance.falling.toShortString(),
+                "attempt", clearance.breaks, "from", feet.toShortString());
+        settleMiner(bot);
+        return true;
+    }
+
+    /** The refusal cell itself or the one directly over it is the only observed source of a gravity refusal. */
+    private static BlockPos observedFallingBlock(AIPlayerEntity bot, ServerLevel world, BlockPos refusalCell) {
+        for (BlockPos candidate : List.of(refusalCell, refusalCell.above())) {
+            if ((ObservableWorldQuery.canObserveCell(bot, candidate)
+                    || ObservableWorldQuery.canObserveBlock(bot, candidate))
+                    && world.getBlockState(candidate).getBlock() instanceof FallingBlock) {
+                return candidate.immutable();
+            }
+        }
+        return null;
+    }
+
+    /** A break is safe only when the bot is outside the target's X/Z column and can still see it. */
+    private static boolean safeGravityStance(AIPlayerEntity bot, ServerLevel world, BlockPos feet, BlockPos falling) {
+        return (feet.getX() != falling.getX() || feet.getZ() != falling.getZ())
+                && Standability.isStandable(world, feet)
+                && (ObservableWorldQuery.canObserveCell(bot, falling)
+                || ObservableWorldQuery.canObserveBlock(bot, falling));
+    }
+
+    /**
+     * Prefer the immediately preceding stair cell; it is a factual dry route out of the gravity
+     * column.  A first rise has no predecessor, so a visible adjacent dry floor is the fallback.
+     */
+    private BlockPos findGravityClearanceStance(AIPlayerEntity bot, ServerLevel world, BlockPos feet, BlockPos falling) {
+        Set<BlockPos> considered = new HashSet<>();
+        for (int index = trail.size() - 2; index >= 0; index--) {
+            BlockPos candidate = trail.get(index);
+            if (considered.add(candidate) && usableGravityStance(bot, world, feet, candidate, falling)) {
+                return candidate.immutable();
+            }
+        }
+        for (Direction direction : HORIZONTAL) {
+            BlockPos candidate = feet.relative(direction);
+            if (considered.add(candidate) && usableGravityStance(bot, world, feet, candidate, falling)) {
+                return candidate.immutable();
+            }
+        }
+        return null;
+    }
+
+    private boolean usableGravityStance(AIPlayerEntity bot, ServerLevel world, BlockPos feet,
+                                        BlockPos candidate, BlockPos falling) {
+        if ((candidate.getX() == falling.getX() && candidate.getZ() == falling.getZ())
+                || candidate.equals(feet)
+                || !ObservableWorldQuery.canObserveCell(bot, candidate)
+                || !ObservableWorldQuery.canObserveCell(bot, candidate.above())
+                || !ObservableWorldQuery.canObserveBlock(bot, candidate.below())
+                || failedSteps.containsKey(stepKey(feet, candidate))) {
+            return false;
+        }
+        WalkedStep.Kind kind = WalkedStepRules.walkKindFor(candidate.getY() - feet.getY());
+        return kind != null && Standability.isStandable(world, candidate)
+                && WalkedStep.refusal(bot, candidate, kind) == null;
+    }
+
+    private void failGravityClearance(AIPlayerEntity bot, GravityClearance clearance, String reason) {
+        failStep(clearance.origin, clearance.landing, "gravity_" + reason);
+        lastRockRefusal = MiningSafety.GRAVITY;
+        BotLog.action(bot, "dig_out_gravity_clear_failed", "falling", clearance.falling.toShortString(),
+                "reason", reason, "at", bot.blockPosition().toShortString());
+        gravityClearance = null;
+    }
+
+    /** Mutable recovery receipt retained while individual gravel/sand blocks settle and are cleared. */
+    private static final class GravityClearance {
+        private final BlockPos falling;
+        private final BlockPos origin;
+        private final BlockPos landing;
+        private int breaks;
+        private int clearTicks;
+        private int noStanceTicks;
+        private int settleTicks;
+
+        private GravityClearance(BlockPos falling, BlockPos origin, BlockPos landing) {
+            this.falling = falling.immutable();
+            this.origin = origin.immutable();
+            this.landing = landing.immutable();
+        }
+    }
+
     /** Settles the active miner exactly once; it can be called before any completion path on the next task tick. */
     private void settleMiner(AIPlayerEntity bot) {
         BlockPos cell = miner.target();
         if (cell == null) {
             return;
         }
+        GravityClearance clearingGravity = gravityClearance != null && cell.equals(gravityClearance.falling)
+                ? gravityClearance : null;
         // BlockMiner selects again when it starts a physical swing. Keep both DigOut-only modes
         // explicit at that boundary: a cancelled/reused miner must never turn a weapon into its
         // fallback for ordinary stone, nor dig player/structure blocks while escaping.
@@ -302,18 +530,67 @@ public final class DigOutTask extends AbstractTask {
             openedByUs.add(cell.immutable());
             openedFlowChecks.put(cell.immutable(), bot.blockPosition().immutable());
             lastProgressTick = elapsed;
+            if (clearingGravity != null) {
+                // The block that was just broken may immediately be replaced by the next sand or
+                // gravel block above it. Keep the bot in its side stance until vanilla settles it.
+                clearingGravity.settleTicks = GRAVITY_SETTLE_TICKS;
+                clearingGravity.noStanceTicks = 0;
+                BotLog.action(bot, "dig_out_gravity_break_done", "falling", cell.toShortString(),
+                        "attempt", clearingGravity.breaks);
+            }
             miningStepOrigin = null;
             miningStepLanding = null;
         } else if (status == BlockMiner.Status.FAILED) {
             // The cell cannot be opened (a break the rule refuses, a block that will not give): this step is not made again.
             String reason = miner.failureReason().isEmpty() ? STEP_FAILED : miner.failureReason();
-            if (miningStepOrigin != null && miningStepLanding != null) {
+            if (clearingGravity != null) {
+                failGravityClearance(bot, clearingGravity, "clear_failed:" + reason);
+            } else if (miningStepOrigin != null && miningStepLanding != null) {
                 failStep(miningStepOrigin, miningStepLanding, reason);
             }
             miningStepOrigin = null;
             miningStepLanding = null;
             BotLog.action(bot, "dig_out_mine_failed", "cell", cell.toShortString(), "reason", reason);
         }
+    }
+
+    // ---- deterministic stair lighting -----------------------------------------------------------------------------
+
+    /**
+     * A straight staircase can alternate mining and stepping forever, leaving no twenty-tick
+     * passive-lighting window. At this task's own fully settled landings, probe the current floor
+     * once every six rises instead. The shared helper still applies the native hostile-spawn light
+     * test, roof check, carried-torch requirement, and real vanilla placement ray; it never scans,
+     * reroutes, digs, or builds a mount elsewhere.
+     *
+     * @return true only while a temporary item-use owner needs this exact quiet landing retried
+     */
+    private boolean maybePlaceTorch(AIPlayerEntity bot, BlockPos feet) {
+        if (!AutomaticLighting.miningTorchAutomationEnabled()) {
+            return false;
+        }
+        if (bot.isUsingItem()) {
+            return true;
+        }
+        if ((lastTorchY != Integer.MIN_VALUE && feet.getY() - lastTorchY < TORCH_RISE_INTERVAL)
+                || lastTorchCheckY == feet.getY()
+                || !bot.getActionPack().isMiningIdle()
+                || !bot.getActionPack().isPathExecutorIdle()
+                || !bot.getActionPack().isWalkToIdle()
+                || !bot.getActionPack().stepIdle()
+                || bot.getActionPack().hasActiveActions()) {
+            return false;
+        }
+        AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceTorchAtFeet(bot);
+        if (placement != AutomaticLighting.Placement.IN_PROGRESS) {
+            lastTorchCheckY = feet.getY();
+        }
+        if (placement == AutomaticLighting.Placement.PLACED) {
+            lastTorchY = feet.getY();
+            lastProgressTick = elapsed;
+            BotLog.action(bot, "dig_out_torch", "pos", feet.toShortString(), "risen", risen);
+        }
+        return placement == AutomaticLighting.Placement.IN_PROGRESS;
     }
 
     // ---- the tool ----------------------------------------------------------------------------------------------------
@@ -692,6 +969,7 @@ public final class DigOutTask extends AbstractTask {
         miner.cancel(bot);
         miningStepOrigin = null;
         miningStepLanding = null;
+        gravityClearance = null;
         miner.naturalTerrainOnly(true);
         miner.swordsMine(false);
     }

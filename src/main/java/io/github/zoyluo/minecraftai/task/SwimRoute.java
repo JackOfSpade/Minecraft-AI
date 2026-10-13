@@ -3,9 +3,7 @@ package io.github.zoyluo.minecraftai.task;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
-import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
-import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -32,8 +30,8 @@ import net.minecraft.world.level.block.state.BlockState;
  * <p>Strict survival expands only water and dry cells that the bot can currently observe: feet and
  * head are proved before their state is read, and a dry cell's support collider is proved before its
  * fresh standability check. Its visibility-filtered frontier is deliberately a local exploration
- * aid, not a hidden-world route planner. The retained {@link PrivilegedCapability#HIDDEN_BLOCK_SCAN} enum value
- * is centrally retired in every profile, so no route may use the full-world planner. Every returned cell is also
+ * aid, not a hidden-world route planner. Hidden-world scanning is retired in every profile, so no
+ * route may use the full-world planner. Every returned cell is also
  * re-verified against the live world by the {@code WalkedStep} rules as it is taken (a route is
  * dropped after repeated refused steps).
  */
@@ -465,8 +463,10 @@ final class SwimRoute {
 
     /** Whether this follow-water operation may deliberately plan through unseen cells. */
     static boolean hiddenWorldScanAllowed(AIPlayerEntity bot) {
-        return CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "follow_swim_route").allowed();
+        // This capability is permanently retired. Do not make a denied capability decision on
+        // every follow-water tick: it created hundreds of audit entries without changing the
+        // result or the strict observed-route behaviour.
+        return false;
     }
 
     /**

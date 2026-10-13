@@ -63,6 +63,8 @@ import net.minecraft.server.level.ServerPlayer;
 final class FollowStuckRecovery {
     /** Real position/target-distance improvement, in blocks, that resolves recovery outright. */
     private static final double RESOLVE_DISTANCE_IMPROVEMENT = 2.0D;
+    /** A stationary recovery should report its need for a route, not flood the server log every tick. */
+    private static final int BARITONE_REQUIRED_LOG_TICKS = 40;
 
     private final RecoveryClock clock = new RecoveryClock(
             /* stallTicksBeforeRecovery= */ 100,
@@ -80,6 +82,12 @@ final class FollowStuckRecovery {
     private WalkedStep step;
     /** Immutable observed-world proof retained by the exact physical recovery lease. */
     private StepAdmission stepAdmission;
+    /** Next recovery tick at which another local-step miss may be logged. */
+    private int nextBaritoneRequiredLogTick;
+    /** Failed guarded steps yield to the already-admitted Baritone route before another local retry. */
+    private int nextLocalStepAttemptTick;
+    /** Prevents a continuation-guard miss from pre-empting and restarting Baritone every server tick. */
+    private static final int LOCAL_STEP_FAILURE_BACKOFF_TICKS = 10;
 
     private record StepAdmission(BlockPos origin, BlockPos destination) {
     }
@@ -105,6 +113,8 @@ final class FollowStuckRecovery {
         lastPos = bot.blockPosition().immutable();
         recoveryStartDistance = Double.NaN;
         forceRepathPending = false;
+        nextBaritoneRequiredLogTick = nowTick;
+        nextLocalStepAttemptTick = nowTick;
         clock.reset(nowTick);
     }
 
@@ -149,6 +159,11 @@ final class FollowStuckRecovery {
             step = null;
             stepAdmission = null;
             if (result == null || !result.succeeded()) {
+                // FollowTask starts (or resumes) its observed Baritone route on this same tick.
+                // Let it receive several physics ticks before another local unstick step can
+                // pre-empt it; a continuation guard miss used to churn both controllers dozens
+                // of times per second without any real movement.
+                nextLocalStepAttemptTick = elapsed + LOCAL_STEP_FAILURE_BACKOFF_TICKS;
                 forceRepathPending = true;
                 return false;
             }
@@ -179,8 +194,12 @@ final class FollowStuckRecovery {
 
         switch (action) {
             case STEP:
-                attemptStep(bot, target, minDistance);
-                return true;
+                // With no legal local step, hand this tick back to FollowTask, but keep its
+                // current Baritone route alive. A STEP window lasts forty ticks; cancelling
+                // and recreating the route for every rejected adjacent cell starves Baritone's
+                // driver and the bot never receives a movement tick. Recovery asks for a fresh
+                // route only at the clock's explicit FORCE_REPATH boundary below.
+                return attemptStep(bot, target, minDistance, elapsed);
             case FORCE_REPATH:
             case BACKOFF_FORCE_REPATH:
                 bot.getActionPack().stopMovement();
@@ -219,7 +238,13 @@ final class FollowStuckRecovery {
      * which is exactly "wait a moment" for a landing that is only momentarily occupied -- and, on
      * the {@code RecoveryClock}'s next alternate window, a fresh replan is tried instead.
      */
-    private void attemptStep(AIPlayerEntity bot, ServerPlayer target, double minDistance) {
+    private boolean attemptStep(AIPlayerEntity bot, ServerPlayer target, double minDistance, int elapsed) {
+        if (elapsed < nextLocalStepAttemptTick) {
+            // Keep the existing Baritone route alive during a failed local step's short retry
+            // backoff. In particular, do not call stopMovement here: it would cancel the driver
+            // we intentionally yielded to above.
+            return false;
+        }
         bot.getActionPack().stopMovement();
         ServerLevel world = bot.level();
         BlockPos current = bot.blockPosition();
@@ -261,15 +286,19 @@ final class FollowStuckRecovery {
                 // A guarded owner denied admission, or this exact recovery step started. In both
                 // cases leave the newly opened/verified candidate alone and retry later rather
                 // than falling through into a competing dig-out controller.
-                return;
+                return true;
             }
         }
-        // No adjacent physical step is legal. Let FollowTask issue its next observed Baritone
-        // replan; recovering by mining through a wall would turn a follow route into terrain
-        // discovery and bypass the shared navigation fence.
-        BotLog.action(bot, "follow_recovery_baritone_required",
-                "from", LogFields.pos(current), "target", LogFields.pos(targetPos));
-        forceRepathPending = true;
+        // No adjacent physical step is legal. Leave the current observed Baritone route alone
+        // until RecoveryClock reaches its scheduled FORCE_REPATH boundary; recovering by mining
+        // through a wall would turn a follow route into terrain discovery and bypass the shared
+        // navigation fence.
+        if (elapsed >= nextBaritoneRequiredLogTick) {
+            BotLog.action(bot, "follow_recovery_baritone_required",
+                    "from", LogFields.pos(current), "target", LogFields.pos(targetPos));
+            nextBaritoneRequiredLogTick = elapsed + BARITONE_REQUIRED_LOG_TICKS;
+        }
+        return false;
     }
 
     /**

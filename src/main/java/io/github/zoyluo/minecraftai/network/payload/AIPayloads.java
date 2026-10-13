@@ -20,5 +20,6 @@ public final class AIPayloads {
         PayloadTypeRegistry.playC2S().register(BotTeleportC2S.ID, BotTeleportC2S.CODEC);
         PayloadTypeRegistry.playS2C().register(BotSnapshotS2C.ID, BotSnapshotS2C.CODEC);
         PayloadTypeRegistry.playS2C().register(BotChatS2C.ID, BotChatS2C.CODEC);
+        PayloadTypeRegistry.playS2C().register(AutoSprintControlS2C.ID, AutoSprintControlS2C.CODEC);
     }
 }

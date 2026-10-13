@@ -30,6 +30,9 @@ final class FollowRecoverySourceContractTest {
                 "the remote pursuit heading stops at the normal personal-space offset");
         assertTrue(follow.contains("baritoneTargetPos.distSqr(targetPos) >= BARITONE_REGOAL_MOVED_SQ"),
                 "re-goal comparison keeps the actual player position rather than the standoff heading");
+        assertTrue(follow.contains("private static final int BARITONE_REGOAL_TICKS = 40;")
+                        && follow.contains("private static final double BARITONE_REGOAL_MOVED_SQ = 16.0D;"),
+                "owner-follow re-goals must avoid rebuilding a full terrain snapshot every second");
         assertTrue(follow.contains("if (repathBackoff && elapsed < nextRepathTick)"),
                 "a failed admission becomes an explicit hold/backoff rather than an every-tick retry");
         assertFalse(follow.contains("ObservableWorldQuery"),
@@ -87,6 +90,56 @@ final class FollowRecoverySourceContractTest {
         assertFalse(follow.contains("startSurfacePathTo"),
                 "follow must not run a second surface-first search on every repath");
         assertTrue(tools.contains("keeping roughly 3-5 blocks of distance"));
+    }
+
+    @Test
+    void selfSupportRefusalIsResolvedOutsideTheVendoredBaritoneCode() throws IOException {
+        String follow = read("task/FollowTask.java");
+        String recovery = read("task/FollowSelfSupportRecovery.java");
+
+        assertTrue(follow.contains("private final FollowSelfSupportRecovery selfSupportRecovery")
+                        && follow.contains("beginSelfSupportRecovery(bot)")
+                        && follow.contains("FollowSelfSupportRecovery.Tick.ACTIVE"),
+                "follow must retain a self-support recovery before generic stalled-route handling replans it");
+        assertTrue(recovery.contains("BaritoneRefusals.of(bot.getUUID(), BaritoneRefusals.Op.BREAK)")
+                        && recovery.contains("MiningSafety.SELF_SUPPORT")
+                        && recovery.contains("MiningSafety.SupportOccupancy.SELF"),
+                "only a current Baritone self-support break refusal may enter this recovery");
+        assertTrue(recovery.contains("miner.naturalTerrainOnly(true)")
+                        && recovery.contains("miner.begin(bot, target)")
+                        && recovery.contains("miner.tick(bot)"),
+                "the recovery must retain one observed natural-terrain target through BlockMiner's safe sidestep and break");
+        assertFalse(read("baritone/ServerPlayerController.java").contains("FollowSelfSupportRecovery"),
+                "the vendored Baritone controller must remain unchanged by follow recovery");
+    }
+
+    @Test
+    void landAndWaterRecoveryNeverCompeteForTheSameStep() throws IOException {
+        String follow = read("task/FollowTask.java");
+        String stuck = read("task/FollowStuckRecovery.java");
+        String selfSupport = read("task/FollowSelfSupportRecovery.java");
+
+        int exit = follow.indexOf("swimming.exitWaterForLand(bot, target, elapsed, STOP_DISTANCE, waterExitForcedByLandRoute)");
+        int preemptLandRecovery = follow.lastIndexOf("if (botInWater)", exit);
+        int suspend = follow.indexOf("suspendLandRecovery(bot);", preemptLandRecovery);
+        assertTrue(preemptLandRecovery >= 0 && suspend > preemptLandRecovery && suspend < exit,
+                "a land miner must release its exact step before water-exit movement is admitted");
+        int stepCase = stuck.indexOf("case STEP:");
+        int forceCase = stuck.indexOf("case FORCE_REPATH:", stepCase);
+        String stepCaseBody = stuck.substring(stepCase, forceCase);
+        assertTrue(stepCaseBody.contains("return attemptStep(bot, target, minDistance, elapsed);")
+                        && !stepCaseBody.contains("forceRepathPending = true;")
+                        && stuck.substring(forceCase).contains("forceRepathPending = true;")
+                        && stuck.contains("BARITONE_REQUIRED_LOG_TICKS"),
+                "a local recovery miss must keep the current route alive; only RecoveryClock's scheduled force-repath may replace it");
+        assertTrue(selfSupport.contains("FAILED_TARGET_BACKOFF_TICKS")
+                        && selfSupport.contains("retryFailedTargetAfterTick")
+                        && selfSupport.contains("lastHandledRefusalTick = refusal.serverTick();"),
+                "a failed self-support sidestep must consume the latest refusal during a bounded retry backoff");
+        assertTrue(stuck.contains("LOCAL_STEP_FAILURE_BACKOFF_TICKS")
+                        && stuck.contains("nextLocalStepAttemptTick = elapsed + LOCAL_STEP_FAILURE_BACKOFF_TICKS")
+                        && stuck.contains("if (elapsed < nextLocalStepAttemptTick)"),
+                "a failed guarded recovery step must yield briefly to the existing Baritone route instead of pre-empting it every tick");
     }
 
     @Test

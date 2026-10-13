@@ -20,7 +20,7 @@ class MiningTorchReserveSourceContractTest {
                 "private static boolean hasPickupConfirmationSupport");
         String automatic = Files.readString(TASKS.resolve("AutomaticLighting.java"));
 
-        assertTrue(lighting.contains("AutomaticLighting.tryPlaceDarkestReachable"),
+        assertTrue(lighting.contains("AutomaticLighting.tryPlaceTorchAtFeet"),
                 "ore digging must retain the shared carried-torch lighting reflex");
         assertTrue(automatic.contains("InventoryAction.countItem(bot, Items.TORCH)"),
                 "automatic lighting must use carried torches");
@@ -37,10 +37,10 @@ class MiningTorchReserveSourceContractTest {
         String source = Files.readString(TASKS.resolve("DescendToYTask.java"));
         String lighting = methodSlice(source, "private boolean maybePlaceTorch", "static void restoreActiveMiningTool");
 
-        assertTrue(lighting.contains("AutomaticLighting.tryPlaceDarkestReachable"),
+        assertTrue(lighting.contains("AutomaticLighting.tryPlaceTorchAtFeet"),
                 "descent must retain the shared carried-torch lighting reflex");
         assertFalse(lighting.contains("BuildAction.placeBlockAt"),
-                "descent must not blindly place a torch at its own feet");
+                "descent must delegate its current-floor torch placement to the shared safety helper");
         assertFalse(lighting.contains("Items.COAL"),
                 "descent must not convert incidental coal into torches");
         assertFalse(lighting.contains("Items.STICK"),

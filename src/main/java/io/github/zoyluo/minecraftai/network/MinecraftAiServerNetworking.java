@@ -3,6 +3,7 @@ package io.github.zoyluo.minecraftai.network;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.action.HarvestCore;
+import io.github.zoyluo.minecraftai.autosprint.AutoSprintController;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
 import io.github.zoyluo.minecraftai.brain.BotRuntimeOptions;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
@@ -71,8 +72,10 @@ public final class MinecraftAiServerNetworking {
                 context.server().execute(() -> handleItemMove(context.player(), payload)));
         ServerPlayNetworking.registerGlobalReceiver(BotTeleportC2S.ID, (payload, context) ->
                 context.server().execute(() -> handleTeleport(context.player(), payload)));
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
-                subscriptions.remove(handler.player.getUUID()));
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            subscriptions.remove(handler.player.getUUID());
+            AutoSprintController.INSTANCE.onDisconnect(handler.player);
+        });
     }
 
     public void tick(MinecraftServer server) {

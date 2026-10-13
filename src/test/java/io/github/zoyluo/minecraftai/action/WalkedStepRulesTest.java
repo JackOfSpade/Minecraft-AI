@@ -24,12 +24,12 @@ class WalkedStepRulesTest {
 
         assertTrue(WalkedStepRules.offsetAllowed(Kind.STEP_DOWN, 1, -1, 0));
         assertTrue(WalkedStepRules.offsetAllowed(Kind.STEP_DOWN, 1, -3, 0), "three blocks is the damage-free drop");
-        assertFalse(WalkedStepRules.offsetAllowed(Kind.STEP_DOWN, 1, -4, 0));
+        assertTrue(WalkedStepRules.offsetAllowed(Kind.STEP_DOWN, 1, -4, 0), "health decides whether a damaging fall is admitted");
         assertFalse(WalkedStepRules.offsetAllowed(Kind.STEP_DOWN, 0, -1, 0), "walking down needs an edge to walk off");
 
         assertTrue(WalkedStepRules.offsetAllowed(Kind.DROP, 0, -1, 0), "a hole just dug underfoot");
         assertTrue(WalkedStepRules.offsetAllowed(Kind.DROP, 0, -3, 0));
-        assertFalse(WalkedStepRules.offsetAllowed(Kind.DROP, 0, -4, 0), "four blocks is not a damage-free fall");
+        assertTrue(WalkedStepRules.offsetAllowed(Kind.DROP, 0, -4, 0), "health decides whether a damaging fall is admitted");
         assertFalse(WalkedStepRules.offsetAllowed(Kind.DROP, 0, 0, 0));
         assertFalse(WalkedStepRules.offsetAllowed(Kind.DROP, 0, 1, 0), "a drop never goes up");
         assertFalse(WalkedStepRules.offsetAllowed(Kind.DROP, 1, -1, 0), "a drop is straight down; a neighbour is a walked step down");
@@ -76,7 +76,7 @@ class WalkedStepRulesTest {
         assertEquals(Kind.STEP_DOWN, WalkedStepRules.walkKindFor(-1));
         assertEquals(Kind.STEP_DOWN, WalkedStepRules.walkKindFor(-3));
         assertNull(WalkedStepRules.walkKindFor(2));
-        assertNull(WalkedStepRules.walkKindFor(-4));
+        assertEquals(Kind.STEP_DOWN, WalkedStepRules.walkKindFor(-4));
     }
 
     @Test
@@ -88,6 +88,14 @@ class WalkedStepRulesTest {
         assertEquals(3, WalkedStepRules.zeroDamageDropLimit(3));
         assertEquals(3, WalkedStepRules.zeroDamageDropLimit(8));
         assertEquals(0, WalkedStepRules.zeroDamageDropLimit(-1));
+    }
+
+    @Test
+    void vanillaFallDamageStartsAfterThreeBlocks() {
+        assertEquals(0, FallSafety.fallDamage(3));
+        assertEquals(1, FallSafety.fallDamage(4));
+        assertEquals(19, FallSafety.fallDamage(22));
+        assertEquals(20, FallSafety.fallDamage(23));
     }
 
     @Test

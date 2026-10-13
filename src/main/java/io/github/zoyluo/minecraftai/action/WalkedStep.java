@@ -198,6 +198,10 @@ public final class WalkedStep {
         if (!WalkedStepRules.offsetAllowed(kind, dx, dy, dz)) {
             return "not_adjacent";
         }
+        if ((kind == Kind.STEP_DOWN || kind == Kind.DROP)
+                && !FallSafety.isNonLethal(bot, -dy)) {
+            return "lethal_fall";
+        }
         ServerLevel level = bot.level();
         if (kind == Kind.SWIM) {
             String hazard = swimHazard(level, target, startsWet(bot));

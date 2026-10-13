@@ -202,6 +202,8 @@ public final class AggroController {
     static final int MAX_CONSECUTIVE_FAILURES = 20;
     /** At most one INFO line per bot per this many ticks for starts and give-ups; the rest go to debug. */
     static final long INFO_GAP_TICKS = 200;
+    /** A hostile inhabitant may change its retaliation target at most once every ten seconds. */
+    static final long RETARGET_COOLDOWN_TICKS = 200;
     /** Speed handed to PvP BOT's move-toward call (1.0 is what its own patrols use). */
     static final double WALK_SPEED = 1.0;
     /** Horizontal distance (blocks) from the last known position at which a pursuit has arrived. */
@@ -276,6 +278,10 @@ public final class AggroController {
         boolean painLed;
         /** The required reaction seconds as of the last tick (status only). */
         double required;
+        /** Last tick at which a hit replaced this bot's retaliation target. */
+        long lastRetargetTick = Long.MIN_VALUE;
+        /** Newest hit received while the retaliation-target cooldown is still active. */
+        AggroWorld.Hit pendingRetarget;
 
         // ---- walking
         long phaseStart;
@@ -454,17 +460,39 @@ public final class AggroController {
         if (st != null) {
             st.pos = bot.position();
         }
-        if (st != null && st.phase == Phase.CHASE) {
-            // A live chase used to return before draining this tick's hit. That left the bot
-            // permanently focused on its original target while a different player kept damaging
-            // it. The latest distinct attacker always gets the normal pain-led handoff (including
-            // reaction-time and visibility safeguards) before the old chase continues.
-            if (hit != null && active() && isDifferentAttacker(st, hit)) {
-                st = onHit(now, world, bot, st, hit, false, cfg);
-                if (st != null && (st.phase == Phase.CHASE || st.phase == Phase.PURSUE)) {
-                    return;
+        if (st != null && active()) {
+            // Apply a retained hit before normal phase handling. This deliberately happens for
+            // every engagement phase, not only CHASE: a bot can be pursuing or searching when
+            // another player damages it.
+            if (st.pendingRetarget != null && mayRetarget(now, st)) {
+                AggroWorld.Hit pending = st.pendingRetarget;
+                st.pendingRetarget = null;
+                if (isDifferentAttacker(st, pending)) {
+                    st = onHit(now, world, bot, st, pending, false, cfg);
+                    if (st != null && (st.phase == Phase.CHASE || st.phase == Phase.PURSUE)) {
+                        return;
+                    }
                 }
             }
+            // A live chase used to return before draining this tick's hit. That left the bot
+            // permanently focused on its original target while a different player kept damaging
+            // it. The newest distinct attacker gets the normal pain-led handoff after a ten-second
+            // cooldown; hits inside that window replace the pending attacker rather than thrashing
+            // the target every combat tick.
+            if (hit != null && isDifferentAttacker(st, hit)) {
+                if (mayRetarget(now, st)) {
+                    st = onHit(now, world, bot, st, hit, false, cfg);
+                    hit = null;
+                    if (st != null && (st.phase == Phase.CHASE || st.phase == Phase.PURSUE)) {
+                        return;
+                    }
+                } else {
+                    st.pendingRetarget = hit;
+                    hit = null;
+                }
+            }
+        }
+        if (st != null && st.phase == Phase.CHASE) {
             chase(now, world, bot, st, cfg);
             return;
         }
@@ -516,6 +544,10 @@ public final class AggroController {
     private static boolean isDifferentAttacker(BotState chase, AggroWorld.Hit hit) {
         Body attacker = hit.attacker();
         return attacker == null || !Objects.equals(attacker.handle(), chase.entity);
+    }
+
+    private static boolean mayRetarget(long now, BotState state) {
+        return state.lastRetargetTick == Long.MIN_VALUE || now - state.lastRetargetTick >= RETARGET_COOLDOWN_TICKS;
     }
 
     private Origin here(Watcher bot) {
@@ -624,6 +656,10 @@ public final class AggroController {
             return existing;
         }
         BotState st = existing != null ? existing : state(name);
+        if (existing == null || !Objects.equals(st.entity, name)) {
+            st.lastRetargetTick = now;
+        }
+        st.pendingRetarget = null;
         if (st.home == null) {
             st.home = here(bot);
         }

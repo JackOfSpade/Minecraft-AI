@@ -55,7 +55,10 @@ final class PvpBotCombatBrain {
      */
     boolean tick(MinecraftServer server, AIPlayerEntity bot, LivingEntity aggressor) {
         Bridge current = bridge();
-        if (current == null || aggressor == null || !aggressor.isAlive()) {
+        if (current == null
+                || aggressor == null
+                || !aggressor.isAlive()
+                || !(aggressor instanceof ServerPlayer)) {
             return false;
         }
         try {

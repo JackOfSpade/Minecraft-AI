@@ -14,16 +14,25 @@ class GoalExecutorFreshFulfillmentSourceContractTest {
         String source = Files.readString(Path.of(
                 "src/main/java/io/github/zoyluo/minecraftai/goal/GoalExecutor.java"));
 
-        assertTrue(source.contains("isFreshFulfillOutputGather(plan.goal, step.item())"));
+        assertTrue(source.contains("isFreshFulfillOutput(plan.goal, step.item())"));
         assertTrue(source.contains("GatherQuotaTask.collectAdditionalExact(step.item(), step.count())"));
         assertTrue(source.contains("fulfill.initialItemCounts().containsKey(item)"));
+        assertTrue(source.contains("new CraftTask(step.item(), craftTargetCount("));
+        assertTrue(source.contains("step.count()), freshOutput)"),
+                "a declared fresh output must carry the same no-reuse requirement into CraftTask");
         assertTrue(source.contains("freshFulfillDelivery,"));
         assertTrue(source.contains("hasFreshFulfillDeliveryQuota(bot, plan, step)"));
         assertTrue(source.contains("GoalSnapshotCollector.inventoryCount(bot, step.item()) >= required"));
         assertTrue(source.contains("hasFreshFulfillPostDeliveryQuota(bot, plan, allocation)"));
         assertTrue(source.contains("completedAfterThisDelivery.add(allocation)"));
-        assertTrue(source.contains("Ingredient gathers retain\n     * their normal family-aware behavior"),
+        assertTrue(source.contains("Ingredient gathers\n     * retain their normal family-aware behavior"),
                 "only a declared fresh output may bypass family-aware gathering");
+
+        String craftTask = Files.readString(Path.of(
+                "src/main/java/io/github/zoyluo/minecraftai/task/CraftTask.java"));
+        assertTrue(craftTask.contains("private final boolean freshOutputRequired;"));
+        assertTrue(craftTask.contains("if (!freshOutputRequired && utilityAlreadyAvailable(bot))"),
+                "a fresh player fulfillment must never let a nearby furnace, table, or held old copy skip production");
     }
 
     /**

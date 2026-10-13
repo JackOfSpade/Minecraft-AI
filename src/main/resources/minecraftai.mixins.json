@@ -19,6 +19,9 @@
     "PhantomSpawnerHumansOnlyMixin",
     "ChunkMapVisibleChunksAccessorMixin",
     "ChunkMapPlayerStatusInvokerMixin",
+    "ChunkMapEntityTrackersAccessorMixin",
+    "ChunkMapEntityTrackerInvokerMixin",
+    "ChunkMapTrackedEntityPairingInvokerMixin",
     "ServerChunkCacheBaritoneMixin",
     "BaritonePalettedContainerMixin",
     "BaritonePalettedContainerDataMixin",
@@ -30,7 +33,10 @@
     "CompanionArrowCollisionMixin",
     "CompanionMeleePassThroughMixin"
   ],
-  "client": [],
+  "client": [
+    "AutoSprintCameraMixin",
+    "AutoSprintMouseMixin"
+  ],
   "server": [],
   "injectors": {
     "defaultRequire": 1

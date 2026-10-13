@@ -660,6 +660,25 @@ class AggroControllerTest {
     }
 
     @Test
+    void latestHitAttackerReplacesTheTargetOnlyAfterTenSeconds() {
+        steve.x = 8;
+        assertTrue(ticksUntilChase(40) > 0);
+        assertEquals("Steve", s.controller.confirmedTarget("Warden7"));
+
+        Person alex = s.world.add("Alex", 4);
+        s.hit(alex);
+        s.run(1);
+        assertEquals("Alex", s.controller.engagedWith("Warden7"), "the first retaliation change is immediate");
+
+        Person sam = s.world.add("Sam", 5);
+        s.hit(sam);
+        s.run(Math.toIntExact(AggroController.RETARGET_COOLDOWN_TICKS - 1));
+        assertEquals("Alex", s.controller.engagedWith("Warden7"), "a second hit inside ten seconds is retained, not retargeted");
+        s.run(1);
+        assertEquals("Sam", s.controller.engagedWith("Warden7"), "the newest attacker wins when the cooldown expires");
+    }
+
+    @Test
     void aProjectileFromAnUnseenShooterSendsTheBotAlongTheIncomingLine() {
         steve.x = 20;
         steve.z = 5;

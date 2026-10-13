@@ -696,8 +696,9 @@ public final class NavSafetyNet {
 
     /** Whether this tick may use a route proof that reads cells outside the bot's observation. */
     private static boolean canUseHiddenWaterScan(AIPlayerEntity bot) {
-        return CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN,
-                "navsafe_water_rescue").allowed();
+        // Keep rescue strictly observation-driven. Like follow-water routing, this must not
+        // repeatedly audit a capability that is globally and permanently retired.
+        return false;
     }
 
     /**
@@ -1496,9 +1497,9 @@ public final class NavSafetyNet {
     private final Map<UUID, RescueStepAdmission> rescueSteps = new ConcurrentHashMap<>();
 
     private record RescueStepAdmission(AIPlayerEntity bot, ActionPack.StepLease lease,
-                                       boolean hiddenWorldScan, BlockPos origin, BlockPos destination) {
+                                       boolean hiddenWorldScan, boolean sourceWater, BlockPos origin, BlockPos destination) {
         private RescueStepAdmission withLease(ActionPack.StepLease nextLease) {
-            return new RescueStepAdmission(bot, nextLease, hiddenWorldScan, origin, destination);
+            return new RescueStepAdmission(bot, nextLease, hiddenWorldScan, sourceWater, origin, destination);
         }
     }
 
@@ -1584,7 +1585,7 @@ public final class NavSafetyNet {
         if (Math.hypot(middle.x - bot.getX(), middle.z - bot.getZ()) < WalkedStepRules.POINT_TOLERANCE) {
             return false;
         }
-        RescueStepAdmission admission = new RescueStepAdmission(bot, null, hiddenWorldScan,
+        RescueStepAdmission admission = new RescueStepAdmission(bot, null, hiddenWorldScan, false,
                 feet.immutable(), feet.immutable());
         ActionPack.StepLease lease = bot.getActionPack().runStep(
                 WalkedStep.begin(bot, middle, WalkedStep.Kind.RECENTER, "navsafe_water_rescue"),
@@ -1622,6 +1623,7 @@ public final class NavSafetyNet {
             return false;
         }
         RescueStepAdmission admission = new RescueStepAdmission(bot, null, hiddenWorldScan,
+                kind == WalkedStep.Kind.SWIM && isWaterSwimCell(bot.level(), bot.blockPosition()),
                 bot.blockPosition().immutable(), cell.immutable());
         ActionPack.StepLease lease = bot.getActionPack().runStep(WalkedStep.begin(bot, cell, kind, reason),
                 (guardBot, step) -> canContinueRescueStep(guardBot, step, admission));
@@ -1655,9 +1657,14 @@ public final class NavSafetyNet {
         // This check has no world read and runs before the capability/visibility proof below.
         // It permits only the one-cell target box (or intermediate vertical cells of a legal
         // DROP/STEP_DOWN), plus WalkedStep's one-tick source-settling normalization envelope.
-        // A multi-cell external relocation therefore cannot keep old rescue keys alive.
+        // A flowing current may move an already-swimming rescue one adjacent cell before its
+        // stroke completes; that small water-only displacement is re-proved below. A multi-cell
+        // external relocation can never keep old rescue keys alive.
+        BlockPos feet = bot.blockPosition();
+        boolean currentDrift = step.kind() == WalkedStep.Kind.SWIM && admission.sourceWater()
+                && withinRescueStepCurrentEnvelope(feet, admission.origin(), admission.destination());
         if (!step.cell().equals(admission.destination())
-                || !withinRescueStepContinuationEnvelope(bot.blockPosition(), admission, step.kind(), step.ticks())) {
+                || (!withinRescueStepContinuationEnvelope(feet, admission, step.kind(), step.ticks()) && !currentDrift)) {
             return false;
         }
         if (admission.hiddenWorldScan()) {
@@ -1676,6 +1683,9 @@ public final class NavSafetyNet {
         }
         if (step.kind() == WalkedStep.Kind.SWIM
                 && hasVisibleSolidDiagonalWaterCorner(bot, admission.origin(), admission.destination())) {
+            return false;
+        }
+        if (currentDrift && observedWaterEscapeCell(bot, bot.level(), feet, false) != WaterEscapeCell.WATER) {
             return false;
         }
         return SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind());
@@ -1721,6 +1731,17 @@ public final class NavSafetyNet {
                                                                  BlockPos destination) {
         return between(feet.getX(), origin.getX(), destination.getX())
                 && between(feet.getZ(), origin.getZ(), destination.getZ())
+                && feet.getY() >= Math.min(origin.getY(), destination.getY()) - 1
+                && feet.getY() <= Math.max(origin.getY(), destination.getY()) + 1;
+    }
+
+    /** One flowing-water cell of drift is safe only while the continued rescue re-proves that cell as water. */
+    private static boolean withinRescueStepCurrentEnvelope(BlockPos feet, BlockPos origin,
+                                                           BlockPos destination) {
+        return feet.getX() >= Math.min(origin.getX(), destination.getX()) - 1
+                && feet.getX() <= Math.max(origin.getX(), destination.getX()) + 1
+                && feet.getZ() >= Math.min(origin.getZ(), destination.getZ()) - 1
+                && feet.getZ() <= Math.max(origin.getZ(), destination.getZ()) + 1
                 && feet.getY() >= Math.min(origin.getY(), destination.getY()) - 1
                 && feet.getY() <= Math.max(origin.getY(), destination.getY()) + 1;
     }

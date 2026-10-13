@@ -6,6 +6,8 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.log.LogFields;
 import io.github.zoyluo.minecraftai.memory.BotMemoryStore;
+import io.github.zoyluo.minecraftai.mixin.ChunkMapEntityTrackersAccessorMixin;
+import io.github.zoyluo.minecraftai.mixin.ChunkMapTrackedEntityPairingInvokerMixin;
 import io.github.zoyluo.minecraftai.network.FakeClientConnection;
 import io.github.zoyluo.minecraftai.mode.CapabilityRuntime;
 import io.github.zoyluo.minecraftai.mode.PrivilegedCapability;
@@ -20,10 +22,12 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.PacketFlow;
+import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ClientInformation;
+import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
@@ -31,10 +35,12 @@ import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.TagValueInput;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.util.Mth;
 import java.util.Collection;
@@ -47,6 +53,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class AIPlayerManager {
     public static final AIPlayerManager INSTANCE = new AIPlayerManager();
+    /** Furthest centre-to-centre distance for a recall/revive advertised as visibly beside its owner. */
+    private static final double OWNER_VISIBLE_ADJACENCY_SQR = 3.5D * 3.5D;
 
     private final Map<UUID, AIPlayerEntity> players = new ConcurrentHashMap<>();
     private final Map<String, UUID> nameIndex = new ConcurrentHashMap<>();
@@ -87,13 +95,14 @@ public final class AIPlayerManager {
                 bot.getLastDamageSource() == null ? "unknown" : bot.getLastDamageSource().getMsgId());
         RuntimeLifecycleCoordinator.INSTANCE.onBotDeath(bot);
         ServerLevel respawnWorld;
-        Vec3 respawnPos;
+        Vec3 respawnPos = null;
         String respawnStrategy;
-        if (anchor != null && anchor.isAlive() && !(anchor instanceof AIPlayerEntity)) {
-            respawnWorld = anchor.level();
-            respawnPos = safeCompanionSpawnPosition(respawnWorld, anchor, bot.getGameProfile().name());
+        ServerPlayer ownerAnchor = anchor != null && anchor.isAlive() && !(anchor instanceof AIPlayerEntity)
+                ? anchor : null;
+        if (ownerAnchor != null) {
+            respawnWorld = ownerAnchor.level();
             respawnStrategy = ownerOf(bot).filter(owner -> owner.equals(anchor.getUUID())).isPresent()
-                    ? "owner_nearby" : "online_player_nearby";
+                    ? "owner_visible_adjacent" : "online_player_visible_adjacent";
         } else {
             boolean enhancedRespawn = CapabilityRuntime.decide(
                     bot, PrivilegedCapability.EMERGENCY_TELEPORT, "death_surface_respawn").allowed();
@@ -122,8 +131,28 @@ public final class AIPlayerManager {
         bot.deathTime = 0;
         applyVanillaRespawnState(bot);
         try {
-            bot.teleportTo(respawnWorld, respawnPos.x, respawnPos.y, respawnPos.z,
-                    Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+            if (ownerAnchor != null) {
+                Optional<OwnerPlacement> placement = teleportCompanionBesideOwner(bot, ownerAnchor);
+                if (placement.isPresent()) {
+                    respawnStrategy = ownerOf(bot).filter(owner -> owner.equals(ownerAnchor.getUUID())).isPresent()
+                            ? placement.get().kind() : "online_player_" + placement.get().kind();
+                } else {
+                    // A bot must still revive if its owner is swimming, falling, or otherwise has
+                    // no standable visible neighbour.  Crucially this is a truthful fallback, not
+                    // an "owner nearby" success record.
+                    respawnPos = safeSpawnPosition(respawnWorld, ownerAnchor.position(), bot.getGameProfile().name());
+                    bot.teleportTo(respawnWorld, respawnPos.x, respawnPos.y, respawnPos.z,
+                            Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+                    respawnStrategy = ownerOf(bot).filter(owner -> owner.equals(ownerAnchor.getUUID())).isPresent()
+                            ? "owner_safe_fallback" : "online_player_safe_fallback";
+                    BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
+                            "companion_respawn_visible_placement_failed",
+                            "owner", ownerAnchor.getGameProfile().name());
+                }
+            } else {
+                bot.teleportTo(respawnWorld, respawnPos.x, respawnPos.y, respawnPos.z,
+                        Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+            }
         } finally {
             bot.completeMinecraftAiDeathRespawn();
         }
@@ -164,6 +193,35 @@ public final class AIPlayerManager {
                 .orElse(false);
     }
 
+    /**
+     * Completes an owner-follow portal handoff. The caller has already proved that the owner was
+     * standing in a real vanilla travel portal in the bot's previous dimension; this method
+     * supplies the destination-side safety and client-pairing proof shared with explicit recall.
+     * It is deliberately owner-only so a named follow task cannot use a portal transition as a
+     * cross-dimension summon.
+     */
+    public boolean followOwnerThroughPortal(AIPlayerEntity bot, ServerPlayer owner) {
+        if (bot == null || owner == null || !bot.isAlive() || !owner.isAlive()
+                || owner instanceof AIPlayerEntity
+                || !owner.getUUID().equals(botOwners.get(bot.getUUID()))) {
+            return false;
+        }
+        bot.getActionPack().stopAll();
+        Optional<OwnerPlacement> placement = teleportCompanionBesideOwner(bot, owner);
+        if (placement.isPresent()) {
+            BotLog.lifecycle(bot, "companion_followed_owner_portal",
+                    "owner", owner.getGameProfile().name(),
+                    "pos", LogFields.pos(bot.blockPosition()),
+                    "placement", placement.get().kind());
+            return true;
+        }
+        BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
+                "companion_portal_follow_failed",
+                "owner", owner.getGameProfile().name(),
+                "reason", "no_visible_adjacent_cell");
+        return false;
+    }
+
     private boolean recallOwnedCompanion(ServerPlayer owner, AIPlayerEntity bot) {
         // Recall is an explicit owner direction, so it also releases the post-owner-death local
         // hold. A revived follower can therefore continue its preserved direct-follow intent.
@@ -172,17 +230,20 @@ public final class AIPlayerManager {
             return respawnDeadBot(bot, owner);
         }
         ServerLevel world = owner.level();
-        Vec3 destination = safeCompanionSpawnPosition(world, owner, bot.getGameProfile().name());
         bot.getActionPack().stopAll();
-        boolean moved = bot.teleportTo(world, destination.x, destination.y, destination.z,
-                Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
-        if (moved) {
+        Optional<OwnerPlacement> placement = teleportCompanionBesideOwner(bot, owner);
+        if (placement.isPresent()) {
             BotLog.lifecycle(bot, "companion_recalled_by_owner",
                     "owner", owner.getGameProfile().name(),
                     "pos", LogFields.pos(bot.blockPosition()),
-                    "placement", "owner_adjacent");
+                    "placement", placement.get().kind());
+        } else {
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
+                    "companion_recall_visible_placement_failed",
+                    "owner", owner.getGameProfile().name(),
+                    "reason", "no_visible_adjacent_cell");
         }
-        return moved;
+        return placement.isPresent();
     }
 
     /**
@@ -319,10 +380,13 @@ public final class AIPlayerManager {
             Optional<ServerPlayer> owner = onlineOwner(server, record);
             if (owner.isPresent()) {
                 ServerPlayer anchor = owner.get();
-                Vec3 anchorPos = safeCompanionSpawnPosition(anchor.level(), anchor, bot.getGameProfile().name());
-                bot.teleportTo(anchor.level(), anchorPos.x, anchorPos.y, anchorPos.z,
-                        Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
-                restoreStrategy += "_then_owner_nearby";
+                if (teleportCompanionBesideOwner(bot, anchor).isPresent()) {
+                    restoreStrategy += "_then_owner_nearby";
+                } else {
+                    BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
+                            "bot_restore_owner_visible_placement_failed",
+                            "owner", anchor.getGameProfile().name());
+                }
             }
             BotLog.lifecycle(bot, "bot_restored",
                     "pos", LogFields.pos(bot.blockPosition()),
@@ -594,25 +658,117 @@ public final class AIPlayerManager {
     }
 
     /**
-     * A companion recall/revive must be visible beside its owner, not hidden inside the same
-     * player-sized space. Prefer a nearby standable cell before falling back to the general safe
-     * spawn resolver for cramped terrain.
+     * Teleports a companion only to a local, standable cell that the owner can actually see after
+     * the move. A teleport API acknowledgement alone is not a recall success: its destination
+     * could be below a cave floor or behind a wall when a broad safe-spawn fallback was used.
      */
-    private static Vec3 safeCompanionSpawnPosition(ServerLevel world, ServerPlayer owner, String name) {
+    private static Optional<OwnerPlacement> teleportCompanionBesideOwner(AIPlayerEntity bot, ServerPlayer owner) {
+        ServerLevel world = owner.level();
+        if (!bot.ensureMinecraftAiEntityTracked()) {
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
+                    "companion_owner_entity_tracking_unavailable",
+                    "owner", owner.getGameProfile().name());
+            return Optional.empty();
+        }
+        for (OwnerPlacement placement : visibleCompanionSpawnPositions(world, owner)) {
+            Vec3 destination = placement.position();
+            boolean moved = bot.teleportTo(world, destination.x, destination.y, destination.z,
+                    Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+            if (moved && isVisibleBesideOwner(bot, owner)
+                    && rebuildOwnerClientPairing(bot, owner)) {
+                return Optional.of(placement);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * A companion fake player can be retained across a death while the real owner's client has
+     * already discarded its entity.  In that state ordinary server-side range/line checks are
+     * true, but the chunk tracker still believes the owner is paired and therefore sends no fresh
+     * add-entity packet.  Replay exactly that one native pairing: profile first, then the vanilla
+     * remove/add sequence which bundles the current spawn, metadata, attributes and equipment.
+     */
+    private static boolean rebuildOwnerClientPairing(AIPlayerEntity bot, ServerPlayer owner) {
+        if (bot.level() != owner.level()) {
+            return false;
+        }
+        ChunkMap chunkMap = owner.level().getChunkSource().chunkMap;
+        Object tracker = ((ChunkMapEntityTrackersAccessorMixin) (Object) chunkMap)
+                .minecraftai$getEntityTrackers().get(bot.getId());
+        if (!(tracker instanceof ChunkMapTrackedEntityPairingInvokerMixin pairing)) {
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
+                    "companion_owner_pairing_tracker_missing",
+                    "owner", owner.getGameProfile().name());
+            return false;
+        }
+        // Player entities need a player-info row before the add-entity packet can render a skin.
+        owner.connection.send(ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(java.util.List.of(bot)));
+        pairing.minecraftai$removePlayer(owner);
+        pairing.minecraftai$updatePlayer(owner);
+        boolean paired = pairing.minecraftai$getSeenBy().contains(owner.connection);
+        boolean visibleAdjacencyFallback = false;
+        if (!paired && isVisibleBesideOwner(bot, owner)) {
+            // A real player normally tracks the chunk they are standing in. A retained fake
+            // player can be revived or recalled between that client's chunk-view updates, though,
+            // and vanilla then declines updatePlayer despite a physically visible adjacent bot.
+            // Replay the same native add pairing once the server-side visibility proof holds.
+            if (pairing.minecraftai$getSeenBy().add(owner.connection)) {
+                pairing.minecraftai$getServerEntity().addPairing(owner);
+            }
+            paired = pairing.minecraftai$getSeenBy().contains(owner.connection);
+            visibleAdjacencyFallback = paired;
+        }
+        if (paired) {
+            BotLog.action(bot, "companion_owner_client_pairing_rebuilt",
+                    "owner", owner.getGameProfile().name(),
+                    "pos", LogFields.pos(bot.blockPosition()),
+                    "source", visibleAdjacencyFallback ? "visible_adjacency_fallback" : "chunk_tracker");
+        } else {
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
+                    "companion_owner_pairing_rebuild_failed",
+                    "owner", owner.getGameProfile().name());
+        }
+        return paired;
+    }
+
+    /**
+     * Enumerates only immediate, physically visible cells. It intentionally never asks the
+     * general nearest-safe resolver: that resolver is allowed to search 128 blocks vertically,
+     * which is appropriate for initial spawning but not for a command named recall.
+     */
+    private static java.util.List<OwnerPlacement> visibleCompanionSpawnPositions(ServerLevel world, ServerPlayer owner) {
         BlockPos origin = owner.blockPosition();
         int[][] offsets = {
                 {2, 0}, {-2, 0}, {0, 2}, {0, -2},
                 {2, 2}, {2, -2}, {-2, 2}, {-2, -2},
                 {1, 0}, {-1, 0}, {0, 1}, {0, -1}
         };
+        java.util.List<OwnerPlacement> placements = new java.util.ArrayList<>();
         Standability.clearCache();
         for (int[] offset : offsets) {
             BlockPos candidate = origin.offset(offset[0], 0, offset[1]);
-            if (Standability.isStandable(world, candidate)) {
-                return Vec3.atBottomCenterOf(candidate);
+            if (Standability.isStandable(world, candidate)
+                    && hasClearOwnerSpawnLine(world, owner, candidate)) {
+                placements.add(new OwnerPlacement(Vec3.atBottomCenterOf(candidate), "owner_visible_adjacent"));
             }
         }
-        return safeSpawnPosition(world, owner.position(), name);
+        return placements;
+    }
+
+    /** This is a physical collider ray, not an owner-facing or FOV condition. */
+    private static boolean hasClearOwnerSpawnLine(ServerLevel world, ServerPlayer owner, BlockPos candidate) {
+        Vec3 targetEye = new Vec3(candidate.getX() + 0.5D, candidate.getY() + 1.62D, candidate.getZ() + 0.5D);
+        HitResult hit = world.clip(new ClipContext(owner.getEyePosition(), targetEye,
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, owner));
+        return hit.getType() == HitResult.Type.MISS;
+    }
+
+    private static boolean isVisibleBesideOwner(AIPlayerEntity bot, ServerPlayer owner) {
+        return bot.level() == owner.level()
+                && bot.isAlive()
+                && bot.distanceToSqr(owner) <= OWNER_VISIBLE_ADJACENCY_SQR
+                && owner.hasLineOfSight(bot);
     }
 
     /** A recall is recovery authority: treat both the normal dead state and a mod-removed corpse as reviveable. */
@@ -628,5 +784,8 @@ public final class AIPlayerManager {
     }
 
     private record RestoreTarget(ServerLevel world, Vec3 pos, boolean fallback, String strategy) {
+    }
+
+    private record OwnerPlacement(Vec3 position, String kind) {
     }
 }

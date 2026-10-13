@@ -277,13 +277,9 @@ public final class RangedWeaponGameTests {
 
     // ------------------------------------------------------------------ legal shots, friendly fire
 
-    /**
-     * With the owner standing on the line of fire the crossbow is never fired: it loads, holds (loaded), and is given up by the
-     * ranged hold. No arrow entity may ever exist. (The same guard is proven for the bow by
-     * {@code combat_hardening_game_tests_friendly_owner_on_the_line_of_fire_gives_the_bow_up_without_a_shot}.)
-     */
-    @GameTest(environment = ENV + "no_crossbow_shot_while_the_owner_stands_in_the_line_of_fire", maxTicks = 320 + PerceptionFixtures.MAX_WAIT_TICKS)
-    public void noCrossbowShotWhileTheOwnerStandsInTheLineOfFire(GameTestHelper context) {
+    /** A crossbow fires through its owner, who remains unharmed while the hostile is hit. */
+    @GameTest(environment = ENV + "crossbow_skips_the_owner_on_the_line_of_fire", maxTicks = 320 + PerceptionFixtures.MAX_WAIT_TICKS)
+    public void crossbowSkipsTheOwnerOnTheLineOfFire(GameTestHelper context) {
         ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendXbowGT", 248, -4, 16, owner.getUUID());
         var world = context.getLevel();
@@ -292,50 +288,38 @@ public final class RangedWeaponGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_SWORD));
         InventoryAction.giveItem(bot, new ItemStack(Items.CROSSBOW));
         InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 16));
-        Zombie zombie = spawnZombie(context, origin.east(12), true);
+        Zombie zombie = spawnZombie(context, origin.east(12), false);
         placeOwner(owner, world, origin.getX() + 6.5D, origin);
         PerceptionFixtures.faceToward(bot, zombie);
         PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
-        require(context, StrikeLegality.friendlyOnLineOfFire(bot, zombie), "fixture: the owner is not on the line of fire");
+        require(context, StrikeLegality.shotRefusal(bot, zombie, RangedWeapon.shapeOf(new ItemStack(Items.CROSSBOW))) == null,
+                "the owner incorrectly blocked the clear crossbow shot");
+        int arrowsBefore = arrows(bot);
+        float ownerHealth = owner.getHealth();
         CombatTask combat = new CombatTask(EntityType.ZOMBIE, 1, 6.0F);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_friend_xbow"));
 
-        boolean[] sawLoaded = {false};
-        int[] giveUpTick = {-1};
+        boolean[] shot = {false};
         PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
-            require(context, botArrows(context, bot) == 0,
-                    "an arrow was fired with the owner on the line of fire: " + combat.describe());
-            if (giveUpTick[0] < 0) {
-                placeOwner(owner, world, origin.getX() + 6.5D, origin);
-                if (RangedWeapon.isLoaded(bot.getMainHandItem())) {
-                    sawLoaded[0] = true;
-                }
-                if (combat.isRangedSuppressed()) {
-                    giveUpTick[0] = (int) since.getAsLong();
-                    require(context, sawLoaded[0], "the crossbow was given up without ever being loaded");
-                    require(context, !combat.describe().contains("phase=RANGED"),
-                            "the bot did not fall back from the ranged phase: " + combat.describe());
-                }
-                if (since.getAsLong() >= 290) {
-                    context.fail(Component.nullToEmpty("the crossbow was never given up: sawLoaded=" + sawLoaded[0]
-                            + " " + combat.describe()));
-                }
-            } else if (since.getAsLong() >= giveUpTick[0] + 25) {
-                zombie.discard();
+            placeOwner(owner, world, origin.getX() + 6.5D, origin);
+            require(context, owner.getHealth() == ownerHealth,
+                    "the crossbow hit its owner instead of passing through them");
+            shot[0] |= botArrows(context, bot) > 0 || arrows(bot) < arrowsBefore;
+            if (!zombie.isAlive()) {
+                require(context, shot[0], "the crossbow killed the zombie without an observed shot");
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_friend_xbow_done");
                 despawnAndComplete(context, bot);
+            } else if (since.getAsLong() >= 290) {
+                context.fail(Component.nullToEmpty("the crossbow never reached the zombie through its owner: " + combat.describe()));
             }
         });
         });
     }
 
-    /**
-     * A Multishot volley also flies ten degrees to either side, so the owner standing on a SIDE arrow's line blocks the shot even
-     * though the middle arrow would miss them (the guard is widened per weapon). Fixture proof plus a live hold.
-     */
-    @GameTest(environment = ENV + "multishot_volley_is_not_fired_with_the_owner_on_a_side_arrow_line", maxTicks = 200 + PerceptionFixtures.MAX_WAIT_TICKS)
-    public void multishotVolleyIsNotFiredWithTheOwnerOnASideArrowLine(GameTestHelper context) {
+    /** Every arrow of a Multishot volley passes through an ally, including one on a side-arrow line. */
+    @GameTest(environment = ENV + "multishot_volley_skips_the_owner_on_a_side_arrow_line", maxTicks = 200 + PerceptionFixtures.MAX_WAIT_TICKS)
+    public void multishotVolleySkipsTheOwnerOnASideArrowLine(GameTestHelper context) {
         ServerPlayer owner = MockPlayers.mock(context);
         AIPlayerEntity bot = spawnCorridor(context, "FriendMultishotGT", 254, -4, 16, owner.getUUID());
         var world = context.getLevel();
@@ -343,7 +327,7 @@ public final class RangedWeaponGameTests {
         bot.getInventory().clearContent();
         InventoryAction.giveItem(bot, enchanted(context, Items.CROSSBOW, Enchantments.MULTISHOT, 1));
         InventoryAction.giveItem(bot, new ItemStack(Items.ARROW, 16));
-        Zombie zombie = spawnZombie(context, origin.east(12), true);
+        Zombie zombie = spawnZombie(context, origin.east(12), false);
         PerceptionFixtures.faceToward(bot, zombie);
         PerceptionFixtures.afterNoticedFresh(context, bot, List.of(zombie), since -> {
         // 8 blocks along the east line, 10 degrees off it: the middle arrow passes to the side, a side arrow does not.
@@ -351,24 +335,25 @@ public final class RangedWeaponGameTests {
         double side = along * Math.tan(Math.toRadians(RangedWeapon.MULTISHOT_SPREAD_DEG));
         owner.teleportTo(world, origin.getX() + 0.5D + along, origin.getY(), origin.getZ() + 0.5D + side,
                 Set.of(), 0.0F, 0.0F, true);
-        require(context, !StrikeLegality.friendlyOnLineOfFire(bot, zombie),
-                "fixture: the owner must be clear of the middle arrow's line");
-        require(context, StrikeLegality.friendlyOnLineOfFire(bot, zombie, RangedWeapon.MULTISHOT_SPREAD_DEG, false),
-                "fixture: the owner must be on a side arrow's line");
+        int arrowsBefore = arrows(bot);
+        float ownerHealth = owner.getHealth();
+        float zombieHealth = zombie.getHealth();
         CombatTask combat = new CombatTask(EntityType.ZOMBIE, 1, 6.0F);
         TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_friend_multishot"));
-        boolean[] sawLoaded = {false};
         PerceptionFixtures.everyTick(context, () -> {
             require(context, bot.isAlive(), "the bot died: " + combat.describe());
-            require(context, botArrows(context, bot) == 0, "a volley was fired with the owner on a side arrow's line");
             owner.teleportTo(world, origin.getX() + 0.5D + along, origin.getY(), origin.getZ() + 0.5D + side,
                     Set.of(), 0.0F, 0.0F, true);
-            sawLoaded[0] |= RangedWeapon.isLoaded(bot.getMainHandItem());
-            if (since.getAsLong() >= 120) {
-                require(context, sawLoaded[0], "fixture: the crossbow never loaded, so the guard was not exercised");
-                zombie.discard();
+            require(context, owner.getHealth() == ownerHealth,
+                    "a Multishot side arrow hit the owner instead of passing through them");
+            if (zombie.getHealth() < zombieHealth) {
+                require(context, arrows(bot) < arrowsBefore || botArrows(context, bot) > 0,
+                        "the Multishot target took damage without an observed shot");
                 TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_friend_multishot_done");
                 despawnAndComplete(context, bot);
+            } else if (since.getAsLong() >= 120) {
+                context.fail(Component.nullToEmpty("the Multishot volley never reached the zombie through its owner: "
+                        + combat.describe()));
             }
         });
         });

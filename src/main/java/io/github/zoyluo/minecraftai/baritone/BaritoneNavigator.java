@@ -16,6 +16,7 @@ import baritone.api.utils.PathCalculationResult;
 import baritone.pathing.movement.movements.MovementFall;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionPack;
+import io.github.zoyluo.minecraftai.action.FallSafety;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
@@ -98,7 +99,7 @@ public final class BaritoneNavigator {
         }
         if (route.shape() == NavRoute.Shape.OWNER_FOLLOW && !isAuthorizedOwnerFollow(bot, route)) {
             // OWNER_FOLLOW is deliberately not a generic x-ray navigation shape. It is admitted only for the bot's current owner,
-            // only toward that owner's current live cell, and only as a dry walk-only route.
+            // only toward that owner's current live cell, and only as a no-place route.
             return Admission.refused("owner_follow_target_not_owner");
         }
         BaritoneRegistry registry = BaritoneRegistry.INSTANCE;
@@ -124,7 +125,7 @@ public final class BaritoneNavigator {
             BotLog.path(bot, "observed_target_route_started", "target", route.target(), "policy", "walk_only",
                     "memory_age", Math.max(0, bot.getServer().getTickCount() - observed.fence().lastObservationTick()));
         }
-        BaritoneSettings.applyNavLimits();
+        BaritoneSettings.applyNavLimits(bot);
         warmUp(baritone, bot);
         NavRoute.Options options = route.options();
         // What a refused start puts back: the permission of the route that is still running (a re-target that fails leaves it running),
@@ -193,7 +194,7 @@ public final class BaritoneNavigator {
                 // continuation: a segment that stops at a visible gap can carry the bot's
                 // momentum over the edge before a later replan has an answer. A complete
                 // observed break route remains valid; only the partial result is fenced.
-                String refusal = observedAdmissionSafetyFailure(route, plan);
+                String refusal = observedAdmissionSafetyFailure(bot, route, plan);
                 if (refusal == null) {
                     refusal = admissionFailure(type, plan.searchMillis(), failureBudgetMs);
                 }
@@ -359,19 +360,24 @@ public final class BaritoneNavigator {
      * discover the continuation with physical momentum. Water and construction routes have their
      * own explicitly modelled movement rules, and flee goals deliberately have no fixed endpoint.
      */
-    static String observedAdmissionSafetyFailure(NavRoute route, BaritonePlanner.Plan plan) {
+    static String observedAdmissionSafetyFailure(AIPlayerEntity bot, NavRoute route, BaritonePlanner.Plan plan) {
         if (plan == null) {
             return requiresCompleteObservedGoal(route) ? "navigation_observed_corridor_unavailable" : null;
         }
         if (plan.type() == PathCalculationResult.Type.EXCEPTION || plan.type() == PathCalculationResult.Type.CANCELLATION) {
             return null;
         }
-        String movementFailure = observedPathSafetyFailure(route, plan.path(), 0);
+        String movementFailure = observedPathSafetyFailure(bot, route, plan.path(), 0);
         if (movementFailure != null) {
             return movementFailure;
         }
         return requiresCompleteObservedGoal(route) && plan.type() != PathCalculationResult.Type.SUCCESS_TO_GOAL
                 ? "navigation_observed_corridor_unavailable" : null;
+    }
+
+    /** Compatibility overload for route-only checks that cannot evaluate a bot-specific fall. */
+    static String observedAdmissionSafetyFailure(NavRoute route, BaritonePlanner.Plan plan) {
+        return observedAdmissionSafetyFailure(null, route, plan);
     }
 
     /**
@@ -394,34 +400,37 @@ public final class BaritoneNavigator {
     static String observedExecutionPathSafetyFailure(AIPlayerEntity bot, IPath path, int firstMovement) {
         NavRoute route = BaritoneRegistry.INSTANCE.observedRoute(bot);
         return route == null ? "navigation_observation_fence_unavailable"
-                : observedPathSafetyFailure(route, path, firstMovement);
+                : observedPathSafetyFailure(bot, route, path, firstMovement);
     }
 
     /**
      * Pure path proof: it reads only Baritone's already-built movement list and route permissions.
      *
-     * <p>Owner follow is deliberately stricter than ordinary navigation. A companion can wait
-     * for its owner to move or choose another observed hop, but it must never initiate
-     * Baritone's multi-block {@link MovementFall} while trying to catch up. The vanilla client
-     * can survive a one-block {@code MovementDescend}; {@code MovementFall}, including its
-     * water-bucket variant, is a committed drop whose landing may change before the owner-follow
-     * route is refreshed. Refusing it here protects both the inline admission path and every
-     * later worker replan before the input bridge can press movement keys.</p>
+     * <p>Owner follow is deliberately stricter than ordinary navigation. It can break an observed
+     * obstruction or cross snapshot-proved water, but cannot place blocks. A companion may take
+     * Baritone's {@link MovementFall} only when its current unprotected health can survive the
+     * vanilla landing. This permits a necessary, non-lethal descent while still refusing lava,
+     * water-bucket, and lethal fall moves. The check protects both the inline admission path and every later
+     * worker replan before the input bridge can press movement keys.</p>
      */
-    static String observedPathSafetyFailure(NavRoute route, IPath path, int firstMovement) {
+    static String observedPathSafetyFailure(AIPlayerEntity bot, NavRoute route, IPath path, int firstMovement) {
         if (route == null) {
             return null;
         }
-        if (!route.options().allowWater() && path != null) {
-            int safeFall = Math.max(1, MinecraftAiConfig.get().nav().maxSafeFall());
+        if (path != null) {
+            int safeFall = FallSafety.maxNonLethalFall(bot);
             boolean ownerFollow = route.shape() == NavRoute.Shape.OWNER_FOLLOW;
             List<IMovement> movements = path.movements();
             for (int index = Math.max(0, firstMovement); index < movements.size(); index++) {
                 IMovement movement = movements.get(index);
-                if (ownerFollow && movement instanceof MovementFall) {
+                if (movement == null) {
+                    continue;
+                }
+                int fallBlocks = movement.getSrc().getY() - movement.getDest().getY();
+                if (ownerFollow && movement instanceof MovementFall && !FallSafety.isNonLethal(bot, fallBlocks)) {
                     return "navigation_owner_follow_fall_refused";
                 }
-                if (movement != null && movement.getSrc().getY() - movement.getDest().getY() > safeFall) {
+                if (!route.options().allowWater() && fallBlocks > safeFall) {
                     return "navigation_unsafe_fall";
                 }
             }
@@ -448,8 +457,7 @@ public final class BaritoneNavigator {
 
     /** Validates the narrow exception before a route gets a chunk snapshot or a Baritone process. */
     private static boolean isAuthorizedOwnerFollow(AIPlayerEntity bot, NavRoute route) {
-        if (route.ownerUuid() == null || route.options().allowBreak() || route.options().allowPlace()
-                || route.options().allowWater()) {
+        if (route.ownerUuid() == null || route.options().allowPlace()) {
             return false;
         }
         ServerPlayer owner = currentOwnerFollowTarget(bot, route);
@@ -458,8 +466,8 @@ public final class BaritoneNavigator {
 
     /** The live owner identity/dimension check shared by first admission and active-route refreshes. */
     private static boolean isCurrentOwnerFollow(AIPlayerEntity bot, NavRoute route) {
-        return route.ownerUuid() != null && !route.options().allowBreak() && !route.options().allowPlace()
-                && !route.options().allowWater() && currentOwnerFollowTarget(bot, route) != null;
+        return route.ownerUuid() != null && !route.options().allowPlace()
+                && currentOwnerFollowTarget(bot, route) != null;
     }
 
     /** Returns the currently connected owner in this bot's level, or null when that authority has gone away. */

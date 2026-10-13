@@ -4164,7 +4164,7 @@ public final class GoalExecutor {
             // family quota (all log species, all forage foods, or the exact item). A fresh
             // Fulfill final allocation is different: its immutable baseline is exact-item based,
             // so an oak-log delivery must not be satisfied by newly collecting birch logs.
-            case GATHER -> Optional.of(plan != null && isFreshFulfillOutputGather(plan.goal, step.item())
+            case GATHER -> Optional.of(plan != null && isFreshFulfillOutput(plan.goal, step.item())
                     ? GatherQuotaTask.collectAdditionalExact(step.item(), step.count())
                     : new GatherQuotaTask(step.item(), gatherTargetCount(
                             GatherQuotaTask.acceptedInventoryCount(bot, step.item()), step.count())));
@@ -4219,9 +4219,12 @@ public final class GoalExecutor {
             // GoalStep.CRAFT carries an incremental delivery count, while CraftTask accepts an
             // absolute inventory target. Preserve already-crafted copies when the planner emits
             // multiple batches of the same tool (for example 1 bootstrap + 4 expedition picks).
-            case CRAFT -> Optional.of(new CraftTask(step.item(), craftTargetCount(
-                    io.github.zoyluo.minecraftai.action.InventoryAction.countItem(bot, step.item()),
-                    step.count())));
+            case CRAFT -> {
+                boolean freshOutput = plan != null && isFreshFulfillOutput(plan.goal, step.item());
+                yield Optional.of(new CraftTask(step.item(), craftTargetCount(
+                        io.github.zoyluo.minecraftai.action.InventoryAction.countItem(bot, step.item()),
+                        step.count()), freshOutput));
+            }
             case SMELT -> Optional.of(new SmeltTask(step.input(), step.output(), step.count()));
             case MOVE -> Optional.of(new MoveTask(bot, step.pos()));
             // P3: the FARM step -> a count-limited FarmTask (till/plant/wait for growth/harvest in place; completes once count units of produce are collected).
@@ -4342,10 +4345,11 @@ public final class GoalExecutor {
     }
 
     /**
-     * Only final fresh-Fulfill output gets exact gather semantics.  Ingredient gathers retain
-     * their normal family-aware behavior so a plan may still bootstrap from any local log type.
+     * Only a declared final fresh-Fulfill output must be newly produced. Ingredient gathers
+     * retain their normal family-aware behavior so a plan may still bootstrap from any local
+     * log type; CraftTask receives this same verdict to forbid a workstation/reused-item skip.
      */
-    private static boolean isFreshFulfillOutputGather(Goal goal, Item item) {
+    private static boolean isFreshFulfillOutput(Goal goal, Item item) {
         return goal instanceof Goal.Fulfill fulfill
                 && fulfill.isFreshInventoryRequest()
                 && fulfill.initialItemCounts().containsKey(item);

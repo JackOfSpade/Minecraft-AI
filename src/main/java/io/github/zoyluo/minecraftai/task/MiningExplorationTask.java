@@ -248,7 +248,7 @@ public final class MiningExplorationTask extends AbstractTask {
             // never a detour away from the surveyed entrance.
             if (AutomaticLighting.miningTorchAutomationEnabled()
                     && bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
-                AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceDarkestReachable(bot);
+                AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceTorchAtFeet(bot);
                 if (placement == AutomaticLighting.Placement.IN_PROGRESS) {
                     return;
                 }

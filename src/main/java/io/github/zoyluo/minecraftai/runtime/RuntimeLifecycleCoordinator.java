@@ -176,20 +176,35 @@ public final class RuntimeLifecycleCoordinator {
     /** Restores an interrupted direct follow after the retained fake player has been revived. */
     public void onBotRespawned(AIPlayerEntity bot) {
         TaskManager.FollowIntent intent = FOLLOW_AFTER_DEATH.remove(bot.getUUID());
-        if (intent == null || !bot.isAlive()) {
+        if (!bot.isAlive()) {
             return;
         }
         if (awaitingOwnerReturn(bot)) {
             BotLog.lifecycle(bot, "companion_waiting_for_owner_after_death");
             return;
         }
-        TaskOrigin origin = intent.origin() == null
+        // Death can arrive while a safety owner (evade/shelter/combat) has already replaced the
+        // original follow, or after a player request deliberately cleared the paused stack.  An
+        // owned companion must still return to its owner after respawn; a suspended mission keeps
+        // its own durable checkpoint and is never replaced by this default stance.
+        boolean fallbackOwnerFollow = intent == null
+                && !GoalExecutor.INSTANCE.hasActivePlan(bot)
+                && AIPlayerManager.INSTANCE.ownerOf(bot).isPresent();
+        if (intent == null && !fallbackOwnerFollow) {
+            return;
+        }
+        TaskOrigin origin = intent == null || intent.origin() == null
                 ? TaskOrigin.of(TaskOrigin.Kind.LLM_TOOL, "death_resume_follow")
                 : intent.origin();
-        TaskManager.INSTANCE.assign(bot, new FollowTask(intent.targetName()), origin);
+        if (fallbackOwnerFollow) {
+            origin = TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "death_owner_follow");
+        }
+        String targetName = intent == null ? "" : intent.targetName();
+        TaskManager.INSTANCE.assign(bot, new FollowTask(targetName), origin);
         BotLog.lifecycle(bot, "follow_resumed_after_death",
-                "target", intent.targetName().isBlank() ? "owner" : intent.targetName(),
-                "origin", origin.kind());
+                "target", targetName.isBlank() ? "owner" : targetName,
+                "origin", origin.kind(),
+                "fallback_owner_follow", fallbackOwnerFollow);
     }
 
     /** Explicit despawn is deletion: publish cancellation first, then forget every cached projection.

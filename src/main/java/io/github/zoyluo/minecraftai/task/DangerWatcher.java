@@ -16,6 +16,7 @@ import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.Entity;
@@ -32,6 +33,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -53,6 +55,17 @@ public final class DangerWatcher {
     /** Counts how often a bot was judged trapped in the dark (before any surface escape is attempted); read by tests. */
     private final Map<UUID, Integer> darkTrapDetections = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextFollowKeepLogTick = new ConcurrentHashMap<>();
+    /**
+     * A companion that had to defend itself should not be claimed by idle maintenance once the
+     * danger is gone.  If the interrupted task was retained, TaskManager resumes it; otherwise
+     * this marker supplies the companion's normal owner-follow stance.
+     */
+    private final Set<UUID> ownerFollowAfterThreat = ConcurrentHashMap.newKeySet();
+    /**
+     * Follow is paused beneath a safety combat task. Announce that ownership change once, then
+     * clear it only when the retained follow actually resumes so a group fight cannot flood chat.
+     */
+    private final Set<UUID> followCombatInterruptions = ConcurrentHashMap.newKeySet();
     /** The answer a bot was last given for the dark trap cell it stands in, so an unchanged situation is not announced again. */
     private final Map<UUID, DarkTrapAnswer> darkTrapAnswers = new ConcurrentHashMap<>();
     /** Deaths wait out their ten-second cooldown here; entries leave only after a successful revive. */
@@ -120,6 +133,8 @@ public final class DangerWatcher {
         nextShelterAttemptTick.remove(id);
         shelterEpisodes.remove(id);
         nextFollowKeepLogTick.remove(id);
+        ownerFollowAfterThreat.remove(id);
+        followCombatInterruptions.remove(id);
         pvpAggressors.remove(id);
         AggroSense.clear(bot);
     }
@@ -141,6 +156,8 @@ public final class DangerWatcher {
         nextShelterAttemptTick.clear();
         shelterEpisodes.clear();
         nextFollowKeepLogTick.clear();
+        ownerFollowAfterThreat.clear();
+        followCombatInterruptions.clear();
         pendingRespawns.clear();
         pvpAggressors.clear();
         PvpBotCombatBrain.INSTANCE.clearAll();
@@ -259,12 +276,14 @@ public final class DangerWatcher {
         // same scanBot invocation always sees the same world this list was computed from.
         List<LivingEntity> hostilePressure = new java.util.ArrayList<>(observableActiveHostilePressure(bot));
         Optional<Threat> threat = collectTopThreat(bot, hostilePressure);
-        // A vanilla Mob target is a factual aggro signal. It is intentionally independent of
-        // line of sight and damage records: PvP BOT must take over the instant a hostile targets
-        // this companion or its owner, including around a corner.
+        // A vanilla Mob target is a factual aggro signal, but must still have an unobstructed
+        // physical line from the companion before it can own local combat. This deliberately
+        // has no view-cone/facing test: an aggressor behind Moss is valid, while one behind a
+        // terrain wall cannot repeatedly preempt follow or make Moss fight through that wall.
         Optional<LivingEntity> aggroTarget = immediateAggressor(bot)
                 .or(() -> Optional.ofNullable(pvpAggressors.get(bot.getUUID()))
-                        .filter(candidate -> isAggroTargetingBotOrOwner(bot, candidate)));
+                        .filter(candidate -> isAggroTargetingBotOrOwner(bot, candidate)))
+                .filter(candidate -> hasOmnidirectionalCombatLine(bot, candidate));
         if (threat.isEmpty() && aggroTarget.isPresent()) {
             LivingEntity aggressor = aggroTarget.get();
             hostilePressure.add(aggressor);
@@ -272,6 +291,13 @@ public final class DangerWatcher {
                     aggressor, aggressor.blockPosition()));
         }
         Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
+        if (active.filter(FollowTask.class::isInstance).isPresent()) {
+            // A retained follow is running again (or the player explicitly started a fresh one),
+            // so a later combat episode deserves its own concise notification.
+            followCombatInterruptions.remove(bot.getUUID());
+        }
+        active.filter(DangerWatcher::isFollowRestoringDefenseTask)
+                .ifPresent(ignored -> armOwnerFollowAfterThreat(bot));
         // A manual retreat becomes ordinary follow after reaching the player's rear block. It is
         // an explicit tactical stance, so neither a visible hostile nor a no-LOS aggro signal may
         // replace it with combat until that follow is cancelled. Nested emergency work does not
@@ -503,15 +529,18 @@ public final class DangerWatcher {
             return true;
         }
         // The emergency branches above (lava/fire, creeper defense, low-health shelter and
-        // healing) retain priority. Once they have declined ownership, a current vanilla aggro
-        // target hands this exact AI player to PvP BOT's combat brain. No owner-distance leash is
-        // applied: the fallback navigation continues following the target beyond PvP BOT's normal
-        // local engagement horizon.
+        // healing) retain priority. PvP BOT is a player-vs-player controller, so only a factual
+        // hostile player may enter its optional bridge. A normal hostile (especially a skeleton)
+        // stays on the deterministic CombatTask: the bridge can report itself active for mobs
+        // while doing no attacks, which leaves the companion's follow task paused under fire.
         boolean lowHealthRecovery = bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp();
+        Optional<LivingEntity> pvpPlayerAggressor = aggroTarget
+                .filter(DangerWatcher::isPvpBotPlayerAggressor)
+                .filter(target -> !CombatCore.isMeleeForbiddenThreat(target));
         if (retreatFollowMode || lowHealthRecovery) {
             PvpBotCombatBrain.INSTANCE.release(bot);
             pvpAggressors.remove(bot.getUUID());
-        } else if (aggroTarget.filter(target -> !CombatCore.isMeleeForbiddenThreat(target)).isPresent()
+        } else if (pvpPlayerAggressor.isPresent()
                 && PvpBotCombatBrain.INSTANCE.available()
                 // A deterministic safety fallback has already taken ownership after a prior bridge
                 // refusal. Do not let a failed optional handoff repeatedly cancel its route (and
@@ -519,9 +548,11 @@ public final class DangerWatcher {
                 // ticked so it can continue or relinquish control normally.
                 && (PvpBotCombatBrain.INSTANCE.isActive(bot)
                 || active.filter(task -> task instanceof CombatTask || task instanceof EvadeTask).isEmpty())) {
-            LivingEntity aggressor = aggroTarget.orElseThrow();
+            LivingEntity aggressor = pvpPlayerAggressor.orElseThrow();
             boolean wasPvpCombatActive = PvpBotCombatBrain.INSTANCE.isActive(bot);
             if (PvpBotCombatBrain.INSTANCE.tick(server, bot, aggressor)) {
+                armOwnerFollowAfterThreat(bot);
+                announceFollowCombatInterruption(bot, active);
                 // PvP BOT has accepted the target and is now the action owner. Only now may its
                 // movement/weapon decisions preempt the current task. Doing this before tick()
                 // created the live pause/resume loop when the bridge declined the handoff.
@@ -573,6 +604,9 @@ public final class DangerWatcher {
                 if (active.isPresent()
                         && shouldPauseForThreat(active.get(), top, task)
                         && shouldPreserveActiveWork(bot)) {
+                    if (task instanceof CombatTask) {
+                        announceFollowCombatInterruption(bot, active);
+                    }
                     if (task instanceof EmergencyShelterTask) {
                         markThreatDirectionAvoided(active.get(), bot, top);
                     }
@@ -601,6 +635,13 @@ public final class DangerWatcher {
                 BotLog.lifecycle(bot, "companion_waiting_for_owner_after_death",
                         "pos", bot.blockPosition().toShortString());
             }
+            return true;
+        }
+        // This belongs ahead of maintenance work such as area lighting.  In the observed
+        // failure, a fight had ended and light_area won the now-idle slot, leaving a companion
+        // without the normal player-follow stance.  Retained player work still wins: only an
+        // otherwise idle owned companion receives the fallback follow order.
+        if (maybeRestoreOwnerFollowAfterThreat(bot, active, threat)) {
             return true;
         }
         // Mitigation hardening (life-saving fallback): trapped in a dark underground spot -> retreat to the surface, taking priority over resupply/eating.
@@ -645,10 +686,88 @@ public final class DangerWatcher {
         return false;
     }
 
+    /** PvP BOT's controller has a target-forcing contract only for real player opponents. */
+    private static boolean isPvpBotPlayerAggressor(LivingEntity target) {
+        return target instanceof ServerPlayer && !(target instanceof AIPlayerEntity);
+    }
+
     static boolean canResumePausedWork(AIPlayerEntity bot, Optional<Threat> threat) {
         return threat.isEmpty()
                 && bot.hurtTime == 0
                 && bot.getHealth() > MinecraftAiConfig.get().combat().retreatHp();
+    }
+
+    /** Arms the owner-follow fallback while one of the bounded hostile-defense owners is live. */
+    private void armOwnerFollowAfterThreat(AIPlayerEntity bot) {
+        if (bot != null && AIPlayerManager.INSTANCE.ownerOf(bot).isPresent()) {
+            ownerFollowAfterThreat.add(bot.getUUID());
+        }
+    }
+
+    /** Announces a combat-only pause of a standing follow order once per uninterrupted danger episode. */
+    private void announceFollowCombatInterruption(AIPlayerEntity bot, Optional<Task> active) {
+        if (bot == null || active.filter(FollowTask.class::isInstance).isEmpty()
+                || !followCombatInterruptions.add(bot.getUUID())) {
+            return;
+        }
+        BrainCoordinator.INSTANCE.sendBotReply(bot,
+                "I'm pausing follow to fight a hostile. I'll resume following you when it's safe.");
+        BotLog.action(bot, "follow_paused_for_combat", "task", "follow");
+    }
+
+    /** Completes the one-time combat interruption notice when its retained follow is active again. */
+    private void announceFollowCombatResumed(AIPlayerEntity bot) {
+        if (followCombatInterruptions.remove(bot.getUUID())) {
+            BrainCoordinator.INSTANCE.sendBotReply(bot, "The danger is clear. I'm following you again.");
+            BotLog.action(bot, "follow_resumed_after_combat", "task", "follow");
+        }
+    }
+
+    /**
+     * Restores the normal companion stance after combat, evade, creeper defense, or an emergency
+     * shelter.  Never overwrites a retained player task and never bypasses a user pause or a live
+     * threat.  Low-health recovery intentionally stays ahead of following: the marker remains
+     * armed until the companion can safely move again.
+     */
+    private boolean maybeRestoreOwnerFollowAfterThreat(AIPlayerEntity bot,
+                                                        Optional<Task> active,
+                                                        Optional<Threat> threat) {
+        UUID id = bot.getUUID();
+        if (!ownerFollowAfterThreat.contains(id) || active.isPresent()) {
+            return false;
+        }
+        if (TaskManager.INSTANCE.isUserPaused(bot)
+                || !canResumePausedWork(bot, threat)
+                || bot.getActionPack().hasActiveActions()) {
+            return true;
+        }
+        if (TaskManager.INSTANCE.hasPaused(bot)) {
+            TaskManager.INSTANCE.resumeFromPause(bot);
+            ownerFollowAfterThreat.remove(id);
+            announceFollowCombatResumed(bot);
+            BotLog.lifecycle(bot, "post_combat_work_resumed",
+                    "mode", "retained_task");
+            return true;
+        }
+        if (AIPlayerManager.INSTANCE.ownerOf(bot).isEmpty()) {
+            ownerFollowAfterThreat.remove(id);
+            return false;
+        }
+        TaskManager.INSTANCE.assign(bot, new FollowTask(""),
+                TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "post_combat_owner_follow"));
+        ownerFollowAfterThreat.remove(id);
+        announceFollowCombatResumed(bot);
+        BotLog.lifecycle(bot, "post_combat_owner_follow_started");
+        return true;
+    }
+
+    private static boolean isFollowRestoringDefenseTask(Task task) {
+        return task instanceof CombatTask
+                || task instanceof EvadeTask
+                || task instanceof CreeperDefenseTask
+                || task instanceof EmergencyShelterTask
+                || task instanceof CombatRegroupTask
+                || task instanceof MiningBarricadeTask;
     }
 
     /**
@@ -1466,9 +1585,9 @@ public final class DangerWatcher {
     /**
      * The surface teleport is denied (strict survival) or there is no open sky above, so the trapped bot answers the way a player in a
      * dark pocket does: it places a torch if it has one, crafts torches from coal and sticks first if it can, and otherwise digs a stair
-     * up out of the dark ({@link DigOutTask}), which ends in a lit cell or under open sky and so lights nothing on the surface. Like the
-     * other lighting reflexes these are background tasks, so the work they interrupt is resumed once they end. With automatic lighting
-     * switched off it only says so.
+     * up out of the dark ({@link DigOutTask}), which ends in a lit cell or under open sky and so lights nothing on the surface. A carried
+     * torch is now a direct, ray-reachable placement that leaves the current task alone; only crafting or digging needs a safety task.
+     * With automatic lighting switched off it only says so.
      */
     private boolean answerDarkTrapWithoutTeleport(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active,
                                                   BlockPos feet, DarkTrapResponse response) {
@@ -1477,11 +1596,20 @@ public final class DangerWatcher {
         }
         darkTrapAnswers.put(bot.getUUID(), new DarkTrapAnswer(feet, response));
         BotLog.danger(bot, "dark_trap_response", "response", response, "at", feet.toShortString());
+        if (response == DarkTrapResponse.LIGHT) {
+            // Never pause useful work merely to route toward a torch mount. The passive helper can
+            // interact only with a floor the bot can already reach with a real vanilla ray and
+            // leaves the route, held slot, and aim intact. If there is no local mount, normal
+            // walking continues and the deterministic background pass tries again at its next
+            // safe boundary.
+            AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceTorchAtFeetPassively(bot);
+            BotLog.danger(bot, "dark_trap_passive_light", "result", placement, "at", feet.toShortString());
+            return false;
+        }
         Task task = switch (response) {
-            case LIGHT -> LightAreaTask.automatic(8, 8);
             case CRAFT_TORCHES -> new CraftTask(net.minecraft.world.item.Items.TORCH, DARK_TRAP_TORCHES);
             case DIG_OUT -> new DigOutTask();
-            case LIGHTING_OFF -> null;
+            case LIGHTING_OFF, LIGHT -> null;
         };
         if (response == DarkTrapResponse.DIG_OUT || response == DarkTrapResponse.LIGHTING_OFF) {
             int now = server.getTickCount();
@@ -1985,6 +2113,15 @@ public final class DangerWatcher {
     private static boolean canReachThreat(AIPlayerEntity bot, LivingEntity mob) {
         // A foreign bot the owner is looking at counts as reachable: the owner nominates it, the strike gate still needs the bot's own line.
         return CombatCore.hasLineOfSightOrOwnerSees(bot, mob);
+    }
+
+    /**
+     * The emergency vanilla-aggro bridge is deliberately omnidirectional: this is a collider
+     * raycast from Moss's eyes, not a field-of-view or facing check. Its one requirement is that
+     * terrain does not separate the companion from the aggressor.
+     */
+    private static boolean hasOmnidirectionalCombatLine(AIPlayerEntity bot, LivingEntity aggressor) {
+        return aggressor != null && aggressor.isAlive() && CombatCore.hasLineOfSight(bot, aggressor);
     }
 
     /**
