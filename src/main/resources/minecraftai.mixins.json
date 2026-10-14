@@ -29,6 +29,7 @@
     "BaritoneLootTableMixin",
     "BaritoneLootContextBuilderMixin",
     "BotMeleeKnockbackMixin",
+    "FreeAnvilExperienceMixin",
     "CompanionProjectileCollisionMixin",
     "CompanionArrowCollisionMixin",
     "CompanionMeleePassThroughMixin"

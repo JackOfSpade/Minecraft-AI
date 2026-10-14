@@ -52,6 +52,15 @@ public final class MixinTargetClassLoadGameTests {
         context.succeed();
     }
 
+    /** Anvil-only XP removal must survive mapping updates and never involve the enchanting-table menu. */
+    @GameTest(maxTicks = 20)
+    public void freeAnvilExperienceMixinTargetLoadsWithTheMixinApplied(GameTestHelper context) {
+        Class<?> target = load(context, "net.minecraft.world.inventory.AnvilMenu");
+        require(context, Arrays.stream(target.getDeclaredMethods()).anyMatch(m -> m.getName().contains("minecraftai$makeAnvilOperationsFree")),
+                "FreeAnvilExperienceMixin's cost hook was not merged into " + target.getName());
+        context.succeed();
+    }
+
     /**
      * The Baritone mixins are applied to vanilla classes at start-up whatever the navigation engine is: the palette accessor (no
      * static initialiser that can crash start-up: the reflective scan is a lazy holder), the loot-context wrapper (a non-exclusive
