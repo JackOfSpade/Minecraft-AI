@@ -366,9 +366,13 @@ final class BaritoneNavigatorMappingTest {
     }
 
     @Test
-    void ownerFollowAcceptsOnlyFallsThatCannotDealVanillaDamage() {
+    void ownerFollowAcceptsFallsThatCannotKillTheBot() {
         assertEquals(0, io.github.zoyluo.minecraftai.action.FallSafety.fallDamage(3));
         assertEquals(1, io.github.zoyluo.minecraftai.action.FallSafety.fallDamage(4));
+        assertTrue(io.github.zoyluo.minecraftai.action.FallSafety.fallDamage(4) < 20,
+                "a full-health companion survives a four-block fall");
+        assertFalse(io.github.zoyluo.minecraftai.action.FallSafety.fallDamage(23) < 20,
+                "the owner-follow fall guard must still refuse a lethal descent");
     }
 
     @Test

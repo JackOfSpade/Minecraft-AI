@@ -152,6 +152,9 @@ final class FollowRecoverySourceContractTest {
                         && stuck.contains("nextLocalStepAttemptTick = elapsed + LOCAL_STEP_FAILURE_BACKOFF_TICKS")
                         && stuck.contains("if (elapsed < nextLocalStepAttemptTick)"),
                 "a failed guarded recovery step must yield briefly to the existing Baritone route instead of pre-empting it every tick");
+        assertTrue(stuck.contains("FallSafety.maxNonLethalFall(bot)")
+                        && stuck.contains("int maxStepDown = Math.max"),
+                "follow recovery must consider a visible descent that the bot can survive, not only the zero-damage config limit");
     }
 
     @Test

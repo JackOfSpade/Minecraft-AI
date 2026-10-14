@@ -108,13 +108,18 @@ public final class ServerPlayerContext implements IPlayerContext {
      * with a stale (or absent) local-site constraint.
      */
     private record NavigationBoundary(ObservedNavigationFence fence, NavRoute.MovementBoundary movementBoundary,
-                                      LoadedChunkSnapshot ownerFollowSnapshot) {
+                                      boolean ownerFollow, LoadedChunkSnapshot ownerFollowSnapshot) {
         private NavigationBoundary {
             fence = java.util.Objects.requireNonNull(fence, "fence");
         }
 
         static NavigationBoundary empty() {
-            return new NavigationBoundary(ObservedNavigationFence.empty(), null, null);
+            return new NavigationBoundary(ObservedNavigationFence.empty(), null, false, null);
+        }
+
+        /** Owner follow may use a dry descent that the bot's current unprotected health can survive. */
+        boolean allowsNonLethalOwnerFollowFall() {
+            return ownerFollow && ownerFollowSnapshot != null;
         }
 
         boolean allowsColumn(int x, int z) {
@@ -345,7 +350,7 @@ public final class ServerPlayerContext implements IPlayerContext {
         ObservedNavigationFence observed = java.util.Objects.requireNonNull(fence, "fence");
         LoadedChunkSnapshot ownerSnapshot = ownerFollow && player().level() instanceof net.minecraft.server.level.ServerLevel serverLevel
                 ? LoadedChunkSnapshot.capture(serverLevel) : null;
-        return new NavigationBoundary(observed, movementBoundary, ownerSnapshot);
+        return new NavigationBoundary(observed, movementBoundary, ownerFollow, ownerSnapshot);
     }
 
     private NavigationBoundary effectiveNavigationBoundary() {
@@ -836,7 +841,14 @@ public final class ServerPlayerContext implements IPlayerContext {
 
     @Override
     public int navigationMaxFallHeightNoWater() {
-        return Math.min(effectiveNavigationLimits().maxSafeFall, FallSafety.maxNonLethalFall(player()));
+        int nonLethalFall = FallSafety.maxNonLethalFall(player());
+        // The ordinary navigation cap remains deliberately damage-free. A verified owner-follow
+        // route is the one exception: its terrain snapshot proves the landing and its path fence
+        // rechecks the actual body before every fall, so a companion may follow its owner down a
+        // visible descent that cannot kill it.
+        return effectiveNavigationBoundary().allowsNonLethalOwnerFollowFall()
+                ? nonLethalFall
+                : Math.min(effectiveNavigationLimits().maxSafeFall, nonLethalFall);
     }
 
     @Override

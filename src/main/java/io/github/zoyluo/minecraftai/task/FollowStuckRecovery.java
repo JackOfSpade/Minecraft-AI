@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionPack;
+import io.github.zoyluo.minecraftai.action.FallSafety;
 import io.github.zoyluo.minecraftai.action.WalkedStep;
 import io.github.zoyluo.minecraftai.action.WalkedStepRules;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
@@ -253,12 +254,12 @@ final class FollowStuckRecovery {
         double minDistSq = minDistance * minDistance;
 
         List<BlockPos> candidates = new ArrayList<>();
-        // WalkedStep permits a horizontal landing up to maxSafeFall blocks lower. Keeping
-        // recovery to one level here made a visible three-block descent look permanently
-        // unreachable even though the normal observed navigator and its physical executor both
-        // admit it. Each candidate still has to pass the same exact-cell and refusal-envelope
-        // proof before a key is pressed.
-        int maxStepDown = Math.max(1, MinecraftAiConfig.get().nav().maxSafeFall());
+        // A recovery step uses the same non-lethal body check as owner-follow navigation. The
+        // ordinary config limit remains the default for other routes, but refusing a visible
+        // survivable landing here would leave follow stuck whenever Baritone needs this local
+        // fallback to step off an edge.
+        int maxStepDown = Math.max(Math.max(1, MinecraftAiConfig.get().nav().maxSafeFall()),
+                FallSafety.maxNonLethalFall(bot));
         for (int dy = -maxStepDown; dy <= 1; dy++) {
             for (Direction direction : Direction.Plane.HORIZONTAL) {
                 BlockPos candidate = current.relative(direction).offset(0, dy, 0);
