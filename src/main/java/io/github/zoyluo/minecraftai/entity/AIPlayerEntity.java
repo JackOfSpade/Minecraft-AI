@@ -559,7 +559,7 @@ public class AIPlayerEntity extends ServerPlayer {
     /**
      * Keep the retained loadout out of third-party grave hooks as well. Fiw Graves injects into
      * {@code ServerPlayer.dropAllDeathLoot} and otherwise clears every inventory slot into a
-     * grave-head before the ten-second companion revive can happen. Dispatching through this
+     * grave-head before the thirty-second companion revive can happen. Dispatching through this
      * subclass override bypasses that player-wide hook only for Minecraft-AI companions; human
      * players still use their normal grave behaviour.
      *

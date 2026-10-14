@@ -68,7 +68,7 @@ public final class DangerWatcher {
     private final Set<UUID> followCombatInterruptions = ConcurrentHashMap.newKeySet();
     /** The answer a bot was last given for the dark trap cell it stands in, so an unchanged situation is not announced again. */
     private final Map<UUID, DarkTrapAnswer> darkTrapAnswers = new ConcurrentHashMap<>();
-    /** Deaths wait out their ten-second cooldown here; entries leave only after a successful revive. */
+    /** Deaths wait out their thirty-second cooldown here; entries leave only after a successful revive. */
     private final Map<UUID, PendingRespawn> pendingRespawns = new ConcurrentHashMap<>();
     /**
      * An aggro target handed to PvP BOT. Keeping this reference is not a distance rule: it lasts
@@ -101,8 +101,8 @@ public final class DangerWatcher {
     private static final double CLOSE_DEFENSIVE_HOSTILE_RADIUS = CombatCore.ATTACK_RANGE + 2.0D;
     /** A loaded hostile that has selected a player can remain aggroed around a corner; this is sensing only, never a chase leash. */
     private static final double VANILLA_AGGRO_SCAN_RADIUS = 128.0D;
-    /** Ten real-time seconds at Minecraft's normal 20 ticks per second. */
-    static final int DEATH_RESPAWN_COOLDOWN_TICKS = 20 * 10;
+    /** Thirty real-time seconds at Minecraft's normal 20 ticks per second. */
+    static final int DEATH_RESPAWN_COOLDOWN_TICKS = 20 * 30;
 
     private DangerWatcher() {
     }
@@ -225,7 +225,7 @@ public final class DangerWatcher {
      * @return true while the bot is dead, including the tick in which it is revived
      */
     public boolean tickDeathRespawn(MinecraftServer server, AIPlayerEntity bot) {
-        // A dead bot owns no safety work. It waits ten seconds, then revives beside its owner (or another real online player),
+        // A dead bot owns no safety work. It waits thirty seconds, then revives beside its owner (or another real online player),
         // rather than instantly reappearing at world spawn and trying to recover from there.
         // isAlive() alone is not a death signal: it also goes false when the entity is removed for
         // a non-death reason (e.g. chunk unload), same pitfall documented in HuntTask's
@@ -884,7 +884,9 @@ public final class DangerWatcher {
      * swinging, not task ownership. Ordinary ranged mobs remain with the reactive follow shield;
      * a marked foreign player actively presenting a ranged weapon, evade-only mobs, creepers,
      * bosses, low health and a hostile that could kill the bot in two hits remain owned by the
-     * normal safety dispatcher; lava, drowning and falling already use non-hostile threat types
+     * normal safety dispatcher. A hostile with a factual vanilla target on the owner is also
+     * dispatched immediately: that is an actual attack, rather than nearby pressure that escort
+     * follow should simply pass. Lava, drowning and falling already use non-hostile threat types
      * and retain priority.
      */
     private boolean followKeepsThreat(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active, Threat top) {
@@ -907,7 +909,8 @@ public final class DangerWatcher {
      * broader than {@link FollowEscort#canEngage(AIPlayerEntity, LivingEntity)}: the latter is a
      * literal, same-tick swing check (range, perception, and physical line), while a harmless
      * melee pursuer outside that envelope is exactly what follow is meant to pass without turning
-     * aside. Only hazards that require a different safety owner revoke the escort stance.
+     * aside. Only hazards that require a different safety owner revoke the escort stance. A mob
+     * that has actually selected the owner is not ordinary pressure: it is an attack to defend.
      */
     private static boolean followMayRetainOrdinaryHostile(AIPlayerEntity bot, LivingEntity entity) {
         if (entity == null
@@ -916,6 +919,7 @@ public final class DangerWatcher {
                 || CombatCore.isBossThreat(entity)
                 || CombatCore.isMeleeForbiddenThreat(entity)
                 || CombatCore.isDrawnRangedForeignBot(entity)
+                || isAggroTargetingOwner(bot, entity)
                 || bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()) {
             return false;
         }

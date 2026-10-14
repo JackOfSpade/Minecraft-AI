@@ -149,7 +149,7 @@ final class CombatHardeningSourceContractTest {
     }
 
     @Test
-    void escortFollowKeepsAnOrdinaryFactualAggressorOutOfBothCombatHandoffs() throws IOException {
+    void escortFollowKeepsNearbyPressureButDefendsAnAggressorThatTargetsItsOwner() throws IOException {
         String watcher = read("task/DangerWatcher.java");
         int keep = watcher.indexOf("boolean followKeepsCurrentThreat = threat");
         int bridge = watcher.indexOf("PvpBotCombatBrain.INSTANCE.available()", keep);
@@ -162,7 +162,7 @@ final class CombatHardeningSourceContractTest {
         assertTrue(watcher.substring(dispatch).contains("&& !followKeepsCurrentThreat) {"),
                 "deterministic combat must not let an aggro marker bypass the escort stance");
         assertFalse(watcher.contains("aggroTarget.isPresent() || !followKeepsThreat"),
-                "a factual aggressor is a threat signal, not an exception to escort ownership");
+                "escort ownership must still be decided by one retention policy, not a dispatch shortcut");
         int followGate = watcher.indexOf("private boolean followKeepsThreat");
         assertTrue(followGate > dispatch);
         String escortGate = watcher.substring(followGate, watcher.indexOf("\n    }", followGate));
@@ -174,12 +174,13 @@ final class CombatHardeningSourceContractTest {
         String escort = read("task/FollowEscort.java");
         assertTrue(retentionPolicy.contains("CombatCore.isDrawnRangedForeignBot(entity)")
                         && retentionPolicy.contains("CombatCore.isMeleeForbiddenThreat(entity)")
+                        && retentionPolicy.contains("isAggroTargetingOwner(bot, entity)")
                         && retentionPolicy.contains("bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()")
                         && retentionPolicy.contains("shouldStartLastResortShelter(bot, hostileThreat(entity))")
                         && !retentionPolicy.contains("FollowEscort.canEngage")
                         && !retentionPolicy.contains("ObservableWorldQuery.canNoticeCreature")
                         && !retentionPolicy.contains("CombatCore.hasLineOfSight"),
-                "task ownership must retain ordinary melee pressure independently of immediate strike acquisition");
+                "task ownership must retain nearby melee pressure independently of immediate strike acquisition, but hand an owner-targeting mob to combat");
         assertTrue(escort.contains("bot.distanceTo(entity) <= ENGAGED_RANGE")
                         && escort.contains("CombatCore.isMeleeForbiddenThreat(entity)")
                         && escort.contains("ObservableWorldQuery.canNoticeCreature(bot, entity)")
