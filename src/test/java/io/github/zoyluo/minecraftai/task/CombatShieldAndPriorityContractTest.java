@@ -65,8 +65,13 @@ class CombatShieldAndPriorityContractTest {
                 ".thenComparing(mob -> meleeModeActive || CombatCore.isRangedThreat(mob) ? 0 : 1)"),
                 "ranged attackers must outrank melee-only mobs specifically when nothing is already "
                         + "close enough to be a melee exchange");
-        int rangedKey = watcher.indexOf(".thenComparing(mob -> meleeModeActive");
-        int distanceKey = watcher.indexOf(".thenComparingDouble(bot::distanceTo)");
+        int selection = watcher.indexOf("hostiles.sort(Comparator");
+        int selectionEnd = watcher.indexOf("        for (LivingEntity mob : hostiles)", selection);
+        assertTrue(selection >= 0 && selectionEnd > selection,
+                "the top-hostile ordering must stay local to collectTopThreat");
+        String ordering = watcher.substring(selection, selectionEnd);
+        int rangedKey = ordering.indexOf(".thenComparing(mob -> meleeModeActive");
+        int distanceKey = ordering.indexOf(".thenComparingDouble(bot::distanceTo)");
         assertTrue(rangedKey >= 0 && distanceKey > rangedKey,
                 "distance must remain the final tiebreaker, applied after the ranged-priority key");
     }

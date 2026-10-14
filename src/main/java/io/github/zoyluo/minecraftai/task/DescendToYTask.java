@@ -2902,7 +2902,14 @@ public final class DescendToYTask extends AbstractTask implements Checkpointable
         // honor that same history instead of blindly re-selecting it as a "fresh" direction the
         // instant a hidden/allowed deeper cell makes it look newly viable; that would silently
         // undo the whole point of recording it.
-        if (traversedDetourEdges.contains(new DetourEdge(feet, ahead))) {
+        DetourEdge forwardEdge = new DetourEdge(feet, ahead);
+        // A support crossing has already proved this pair is a lateral detour, not a new
+        // descent route.  Reject either orientation here so the ordinary stair planner cannot
+        // immediately turn around, mine the original wall, and consume a tool after crossing.
+        // tryLateralDetour deliberately keeps its directed-edge rule, preserving a real one-time
+        // backtrack when no forward route remains.
+        if (traversedDetourEdges.contains(forwardEdge)
+                || traversedDetourEdges.contains(new DetourEdge(ahead, feet))) {
             return false;
         }
         // `ahead`/`ahead.up()` touch the bot's body exactly like the fluid check below -- a

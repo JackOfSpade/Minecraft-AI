@@ -14,6 +14,8 @@ import io.github.zoyluo.minecraftai.brain.ToolRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.gametest.MockPlayers;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.navigation.NavOutcome;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import java.util.List;
 import java.util.Set;
@@ -1108,6 +1110,447 @@ public final class CombatHardeningGameTests {
             if (context.getTick() >= 380) {
                 context.fail(Component.nullToEmpty("the step scenario stalled in stage " + stage[0]
                         + " free=" + freeTicks[0] + " slowed=" + slowedTicks[0]));
+            }
+        });
+    }
+
+    /**
+     * A low-health guard starts exactly on its work site's eight-block edge, with a noticed
+     * skeleton slightly inward and off-axis. Its full escape fan is entirely outside the site,
+     * but the last three-block fan direction is safely inside it. The one-tick probe makes the
+     * outward premise real before it is cancelled; the live anchored task must then take the
+     * short in-leash leg and keep both its admitted endpoint and actual body in the leash while
+     * the AI-less bow user keeps immediate ranged pressure alive.
+     */
+    @GameTest(environment = ENV + "anchored_retreat_at_leash_edge_never_admits_an_outside_goal",
+            maxTicks = 100 + PerceptionFixtures.MAX_WAIT_TICKS)
+    public void anchoredRetreatAtLeashEdgeNeverAdmitsAnOutsideGoal(GameTestHelper context) {
+        var world = context.getLevel();
+        world.setDayTime(18000L);
+        BlockPos anchor = context.absolutePos(new BlockPos(3, 218, 3));
+        // Keep the whole fan, including the old outward endpoint, on one broad factual surface.
+        // The route may cross a structure-chunk border, so force every fixture chunk before the
+        // bot or skeleton can tick.
+        for (int dx = -10; dx <= 20; dx++) {
+            for (int dz = -10; dz <= 10; dz++) {
+                BlockPos cell = anchor.offset(dx, 0, dz);
+                world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                for (int dy = 0; dy <= 3; dy++) {
+                    world.setBlock(cell.above(dy), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing.forceForTest(context,
+                (anchor.getX() - 10) >> 4, (anchor.getX() + 20) >> 4,
+                (anchor.getZ() - 10) >> 4, (anchor.getZ() + 10) >> 4);
+
+        BlockPos botFeet = anchor.east(8);
+        AIPlayerEntity bot = spawnBot(context, "AnchoredRetreatEdgeGT", botFeet, null);
+        // The one-block south offset gives the last lateral short-fan leg an inward component:
+        // all six-block goals remain outside at x=8, while that three-block leg lands in-bounds.
+        var skeleton = spawnArmedSkeleton(context, anchor.east(4).south());
+        skeleton.setNoAi(true);
+        skeleton.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH).setBaseValue(600.0D);
+        skeleton.setHealth(600.0F);
+
+        PerceptionFixtures.faceToward(bot, skeleton);
+        PerceptionFixtures.afterNoticedFresh(context, bot, List.of(skeleton), since -> {
+            // Do not let the watcher start an unrelated low-health reaction while perception is
+            // establishing this fixture; afterNoticedFresh has just cleared that reaction.
+            bot.getFoodData().setFoodLevel(6);
+            bot.setHealth(4.0F);
+            List<BlockPos> fullFan = EvadeTask.chooseGoals(bot, skeleton, skeleton.blockPosition(), 6);
+            List<BlockPos> shortFan = EvadeTask.chooseGoals(bot, skeleton, skeleton.blockPosition(), 3);
+            boolean fullFanAllOutside = fullFan.stream()
+                    .noneMatch(candidate -> CombatTask.isDefensiveRetreatEndpointAllowed(anchor, candidate));
+            BlockPos shortInLeash = shortFan.stream()
+                    .filter(candidate -> CombatTask.isDefensiveRetreatEndpointAllowed(anchor, candidate))
+                    .findFirst()
+                    .orElse(null);
+            if (fullFan.isEmpty()
+                    || !fullFanAllOutside
+                    || shortInLeash == null) {
+                context.fail(Component.nullToEmpty("fixture did not force the full-to-short leash boundary: full="
+                        + fullFan + " short=" + shortFan));
+                return;
+            }
+            BlockPos outwardCandidate = fullFan.get(0);
+            ActionResult outwardRoute = bot.getActionPack().startSurfacePathTo(outwardCandidate);
+            require(context, outwardRoute.isInProgress() && bot.getActionPack().hasBaritoneRoute(),
+                    "fixture's outside retreat candidate was not routeable: "
+                            + outwardRoute.status() + ":" + outwardRoute.reason());
+            BlockPos outwardResolved = bot.getActionPack().activePathGoal();
+            require(context, outwardResolved != null
+                            && !CombatTask.isDefensiveRetreatEndpointAllowed(anchor, outwardResolved),
+                    "fixture's unbounded route did not retain an outside endpoint: candidate="
+                            + outwardCandidate + " resolved=" + outwardResolved);
+            // The probe has not had a movement tick.  Clear it and its test-only throttle before
+            // the real combat task owns the same bot.
+            bot.getActionPack().stopAll();
+            bot.getActionPack().forgetPathThrottleForTests();
+
+            require(context, CombatTask.isImmediatePressureOn(bot, skeleton),
+                    "fixture skeleton did not retain immediate ranged pressure after notice");
+            CombatTask combat = CombatTask.defensive(skeleton, 6.0F, anchor);
+            TaskManager.INSTANCE.assign(bot, combat, TaskOrigin.safety("gametest_anchored_retreat_edge"));
+            AtomicBoolean sawRetreat = new AtomicBoolean();
+            AtomicBoolean sawInLeashRoute = new AtomicBoolean();
+            PerceptionFixtures.everyTick(context, () -> {
+                require(context, bot.isAlive(), "the bot died against the disabled skeleton: " + combat.describe());
+                require(context, TaskManager.INSTANCE.getActive(bot).orElse(null) == combat,
+                        "the anchored retreat lost task ownership: "
+                                + TaskManager.INSTANCE.getActive(bot).map(Task::describe).orElse("none"));
+                // Natural regeneration must not let a route-admission test quietly leave RETREAT.
+                bot.setHealth(4.0F);
+                if (combat.describe().contains("phase=RETREAT")) {
+                    sawRetreat.set(true);
+                }
+                BlockPos activeGoal = bot.getActionPack().activePathGoal();
+                NavOutcome lastOutcome = bot.getActionPack().lastRouteOutcome();
+                require(context, lastOutcome == null
+                                || !"navigation_action_cell_unobserved".equals(lastOutcome.reason()),
+                        "anchored retreat retried an action cell that boundary admission should have refused: "
+                                + lastOutcome + " " + combat.describe());
+                require(context, CombatTask.isWithinDefensiveLeash(anchor, bot.blockPosition()),
+                        "anchored retreat moved outside its work site: body=" + bot.blockPosition()
+                                + " goal=" + activeGoal + " " + combat.describe());
+                require(context, activeGoal == null
+                                || CombatTask.isDefensiveRetreatEndpointAllowed(anchor, activeGoal),
+                        "anchored retreat admitted an outside route endpoint: " + activeGoal
+                                + " anchor=" + anchor + " " + combat.describe());
+                if (activeGoal != null) {
+                    sawInLeashRoute.set(true);
+                }
+                if (since.getAsLong() >= 60) {
+                    require(context, sawRetreat.get(),
+                            "the low-health anchored task never entered RETREAT: " + combat.describe());
+                    require(context, sawInLeashRoute.get(),
+                            "the full fan did not fall back to the factual in-leash short leg: "
+                                    + combat.describe());
+                    require(context, combat.state() == TaskState.RUNNING,
+                            "the anchored task released immediate ranged pressure instead of holding/retrying: "
+                                    + combat.state() + ":" + combat.failureReason());
+                    skeleton.discard();
+                    TaskManager.INSTANCE.cancelIntentTasks(bot, "gametest_anchored_retreat_edge_done");
+                    despawnAndComplete(context, bot);
+                }
+            });
+        });
+    }
+
+    /**
+     * A fence spans the whole in-leash diameter between two valid defensive feet cells. It is
+     * visible but impassable to a no-dig surface route, so the only real route goes around one
+     * fence end outside the circular site and then back in. The unbounded control must physically
+     * make that detour; the same endpoint under the persisted defensive boundary must be refused
+     * before it can hand any movement to the body.
+     */
+    @GameTest(environment = ENV + "anchored_retreat_forced_detour_never_leaves_boundary", maxTicks = 320)
+    public void anchoredRetreatForcedDetourNeverLeavesBoundary(GameTestHelper context) {
+        var world = context.getLevel();
+        world.setDayTime(18000L);
+        BlockPos anchor = context.absolutePos(new BlockPos(3, 236, 3));
+        NavRoute.MovementBoundary boundary = CombatTask.defensiveMovementBoundary(anchor);
+        // Keep the direct line one block inside the northern edge of the site.  A fence spanning
+        // the diameter still forces its bypass to z=9, outside the radius-eight circle, but the
+        // only useful detour is now two cells off the direct observed corridor.  That matters to
+        // the positive control: it must receive a factual, eye-proven outside path rather than
+        // relying on an unobserved side lane that a real strict-survival admission correctly
+        // refuses.
+        BlockPos start = anchor.offset(3, 0, 7);
+        BlockPos goal = anchor.offset(-3, 0, 7);
+        // The complete unbounded detour is deliberately factual terrain, including the two
+        // outside columns around each fence end. Fences are sight-transparent to the observation
+        // proof but collision-solid to surface movement.
+        for (int dx = -11; dx <= 11; dx++) {
+            for (int dz = -11; dz <= 11; dz++) {
+                BlockPos cell = anchor.offset(dx, 0, dz);
+                world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                for (int dy = 0; dy <= 3; dy++) {
+                    world.setBlock(cell.above(dy), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        for (int dz = -8; dz <= 8; dz++) {
+            world.setBlock(anchor.offset(0, 0, dz), Blocks.OAK_FENCE.defaultBlockState(), Block.UPDATE_ALL);
+        }
+        io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing.forceForTest(context,
+                (anchor.getX() - 11) >> 4, (anchor.getX() + 11) >> 4,
+                (anchor.getZ() - 11) >> 4, (anchor.getZ() + 11) >> 4);
+        require(context, boundary.allowsFeet(start) && boundary.allowsFeet(goal)
+                        && !boundary.allowsFeet(anchor.offset(0, 0, 9)),
+                "forced-detour fixture did not put both endpoints in the defensive circle and the fence bypass outside it");
+
+        AIPlayerEntity bot = spawnBot(context, "AnchoredDetourGT", start, null);
+        int[] phase = {0};
+        long[] requestedAt = {-1L};
+        long[] boundedAt = {-1L};
+        context.failIfEver(() -> {
+            require(context, bot.isAlive(), "forced-detour bot died: " + bot.blockPosition());
+            switch (phase[0]) {
+                case 0 -> {
+                    // Let vanilla settle the freshly spawned body before the control route owns
+                    // it. Checking hasBaritoneRoute on the same callback that starts a goal can
+                    // settle its still-pending hand-off, so begin the assertion next tick.
+                    if (context.getTick() < 3) {
+                        return;
+                    }
+                    ActionResult unbounded = bot.getActionPack().startSurfacePathTo(goal);
+                    require(context, unbounded.isInProgress(),
+                            "unbounded forced-detour control was not admitted: "
+                                    + unbounded.status() + ":" + unbounded.reason());
+                    requestedAt[0] = context.getTick();
+                    phase[0] = 1;
+                }
+                case 1 -> {
+                    if (context.getTick() <= requestedAt[0] + 1) {
+                        return;
+                    }
+                    require(context, bot.getActionPack().hasBaritoneRoute(),
+                            "unbounded forced-detour control ended before movement: "
+                                    + bot.getActionPack().lastRouteOutcome());
+                    if (!boundary.allowsFeet(bot.blockPosition())) {
+                        // Positive control: this endpoint is routeable only by physically leaving
+                        // the circle. Reset the exact same body before asking the bounded API.
+                        bot.getActionPack().stopAll();
+                        bot.getActionPack().forgetPathThrottleForTests();
+                        bot.teleportTo(world, start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D,
+                                Set.of(), bot.getYRot(), bot.getXRot(), true);
+                        bot.setDeltaMovement(Vec3.ZERO);
+                        requestedAt[0] = context.getTick();
+                        phase[0] = 2;
+                        return;
+                    }
+                    if (context.getTick() >= 220) {
+                        context.fail(Component.nullToEmpty("unbounded forced-detour control never left the defensive circle: body="
+                                + bot.blockPosition() + " outcome=" + bot.getActionPack().lastRouteOutcome()));
+                    }
+                }
+                case 2 -> {
+                    require(context, boundary.allowsFeet(bot.blockPosition()),
+                            "reset body was not back inside the defensive circle: " + bot.blockPosition());
+                    if (context.getTick() <= requestedAt[0] + 2) {
+                        return;
+                    }
+                    ActionResult bounded = bot.getActionPack().startSurfacePathWithinBoundary(goal, boundary);
+                    require(context, bounded.isFailed(),
+                            "bounded forced-detour route was admitted despite an outside-only bypass: "
+                                    + bounded.status() + ":" + bounded.reason());
+                    require(context, !bot.getActionPack().hasBaritoneRoute()
+                                    && bot.getActionPack().activePathGoal() == null,
+                            "a refused bounded detour left a route or endpoint behind: goal="
+                                    + bot.getActionPack().activePathGoal());
+                    boundedAt[0] = context.getTick();
+                    phase[0] = 3;
+                }
+                case 3 -> {
+                    // The route was refused synchronously, but retain a short live body check so
+                    // a queued successor or stale input cannot leak across the site boundary.
+                    require(context, boundary.allowsFeet(bot.blockPosition()),
+                            "bounded forced-detour route leaked the body outside its boundary: " + bot.blockPosition());
+                    require(context, !bot.getActionPack().hasBaritoneRoute()
+                                    && bot.getActionPack().activePathGoal() == null,
+                            "bounded forced-detour refusal later revived a route: "
+                                    + bot.getActionPack().activePathGoal());
+                    if (context.getTick() >= boundedAt[0] + 20) {
+                        despawnAndComplete(context, bot);
+                    }
+                }
+                default -> context.fail(Component.nullToEmpty("unknown forced-detour test phase " + phase[0]));
+            }
+        });
+    }
+
+    /**
+     * Two legal tangent feet cells can still cross the outside corner when vanilla resolves a
+     * diagonal's axes separately. Give an active bounded route that exact residual vector and
+     * prove the entity-level sweep clips it before physics, then retires the route after physics
+     * rather than letting a stale executor retry it.
+     */
+    @GameTest(environment = ENV + "anchored_boundary_physics_sweep_clips_tangent_diagonal", maxTicks = 100)
+    public void anchoredBoundaryPhysicsSweepClipsTangentDiagonal(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos anchor = context.absolutePos(new BlockPos(3, 248, 3));
+        NavRoute.MovementBoundary boundary = CombatTask.defensiveMovementBoundary(anchor);
+        BlockPos start = anchor.east(8);
+        BlockPos inwardGoal = anchor.east(4);
+        for (int dx = -10; dx <= 10; dx++) {
+            for (int dz = -10; dz <= 10; dz++) {
+                BlockPos cell = anchor.offset(dx, 0, dz);
+                world.setBlock(cell.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
+                for (int dy = 0; dy <= 3; dy++) {
+                    world.setBlock(cell.above(dy), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing.forceForTest(context,
+                (anchor.getX() - 10) >> 4, (anchor.getX() + 10) >> 4,
+                (anchor.getZ() - 10) >> 4, (anchor.getZ() + 10) >> 4);
+        require(context, boundary.allowsFeet(start) && boundary.allowsFeet(anchor.offset(7, 0, 1))
+                        && !boundary.allowsFeet(anchor.offset(8, 0, 1)),
+                "tangent sweep fixture did not make the diagonal endpoints legal and corner illegal");
+
+        AIPlayerEntity bot = spawnBot(context, "AnchoredSweepGT", start, null);
+        int[] phase = {0};
+        long[] injectedAt = {-1L};
+        context.failIfEver(() -> {
+            require(context, bot.isAlive(), "tangent sweep bot died: " + bot.blockPosition());
+            require(context, boundary.allowsFeet(bot.blockPosition()),
+                    "bounded tangent sweep leaked its body outside the circle: " + bot.blockPosition());
+            switch (phase[0]) {
+                case 0 -> {
+                    if (context.getTick() < 3) {
+                        return;
+                    }
+                    ActionResult started = bot.getActionPack().startSurfacePathWithinBoundary(inwardGoal, boundary);
+                    require(context, started.isInProgress(), "tangent sweep route was not admitted: "
+                            + started.status() + ":" + started.reason());
+                    phase[0] = 1;
+                }
+                case 1 -> {
+                    if (!bot.getActionPack().hasBaritoneRoute()) {
+                        if (context.getTick() > 40) {
+                            context.fail(Component.nullToEmpty("tangent sweep route never became active: "
+                                    + bot.getActionPack().lastRouteOutcome()));
+                        }
+                        return;
+                    }
+                    // Route planning can take a few ticks and, on a fast machine, begin the
+                    // harmless inward leg before this callback gets a turn. Re-anchor the
+                    // fixture pose just before injecting the residual vector so the tangent
+                    // geometry is exact without relying on scheduler timing. This deliberately
+                    // uses Entity#setPos rather than a teleport: a real teleport correctly
+                    // revokes a live route's observed-world authority, which would make this a
+                    // teleport regression instead of a physical-boundary regression.
+                    bot.setPos(start.getX() + 0.5D, start.getY(), start.getZ() + 0.5D);
+                    bot.setDeltaMovement(Vec3.ZERO);
+                    // From (8, 0) this ends in legal feet cell (7, 1), but a Z-before-X
+                    // collision resolution would visit forbidden (8, 1). It simulates the
+                    // residual sprint/knockback vector that no static Baritone movement can
+                    // enumerate exactly.
+                    // Include the ordinary grounded gravity probe as well. The entity guard
+                    // must ask vanilla collision whether that Y component is supported, then
+                    // still reject the forbidden horizontal tangent rather than treating stale
+                    // onGround state as a substitute for the real collision result.
+                    bot.setDeltaMovement(new Vec3(-0.8D, -0.08D, 0.8D));
+                    injectedAt[0] = context.getTick();
+                    phase[0] = 2;
+                }
+                case 2 -> {
+                    if (context.getTick() <= injectedAt[0] + 1L) {
+                        return;
+                    }
+                    NavOutcome outcome = bot.getActionPack().lastRouteOutcome();
+                    require(context, !bot.getActionPack().hasBaritoneRoute(),
+                            "physics boundary refusal left its route alive: " + outcome);
+                    require(context, outcome != null
+                                    && "navigation_movement_boundary_refused".equals(outcome.reason()),
+                            "physics sweep did not publish the bounded refusal: " + outcome);
+                    despawnAndComplete(context, bot);
+                }
+                default -> context.fail(Component.nullToEmpty("unknown tangent sweep phase " + phase[0]));
+            }
+        });
+    }
+
+    /**
+     * A body can still report the prior move's ground state after horizontal motion carries it
+     * off a ledge. Start an ordinary bounded route on a supported platform, inject that exact
+     * horizontal/gravity walk-off into an in-circle void, and require the physical floor guard to
+     * retire the route before feet can enter the lower Y cell. The post-release checks then prove
+     * the retained backstop does not trust a deliberately stale ground flag either.
+     */
+    @GameTest(environment = ENV + "anchored_boundary_physics_sweep_clips_grounded_ledge_walk_off", maxTicks = 140)
+    public void anchoredBoundaryPhysicsSweepClipsGroundedLedgeWalkOff(GameTestHelper context) {
+        var world = context.getLevel();
+        BlockPos anchor = context.absolutePos(new BlockPos(3, 260, 3));
+        // This fixture deliberately uses a floor at the supported stance itself. The production
+        // defensive boundary permits a bounded descent, but the physical seam under test is the
+        // same one and must reject the first stale-ground gravity probe when horizontal motion
+        // has already carried the collision box over the void. Keeping the floor here makes that
+        // proof occur before an unrelated path re-plan can end the route.
+        NavRoute.MovementBoundary boundary = new NavRoute.MovementBoundary(anchor, 8, anchor.getY());
+        BlockPos start = anchor;
+        BlockPos inwardGoal = anchor.west(4);
+        BlockPos unsupportedColumn = anchor.east(2);
+        // The west half is a perfectly ordinary path to the goal. East of the starting edge is
+        // intentionally air below the same legal circle, so only the vertical feet floor—not a
+        // horizontal radius violation—must catch the injected coast.
+        for (int dx = -10; dx <= 10; dx++) {
+            for (int dz = -10; dz <= 10; dz++) {
+                BlockPos cell = anchor.offset(dx, 0, dz);
+                world.setBlock(cell.below(), dx <= 0 ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState(),
+                        Block.UPDATE_ALL);
+                for (int dy = 0; dy <= 3; dy++) {
+                    world.setBlock(cell.above(dy), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                }
+            }
+        }
+        io.github.zoyluo.minecraftai.gametest.GameTestChunkForcing.forceForTest(context,
+                (anchor.getX() - 10) >> 4, (anchor.getX() + 10) >> 4,
+                (anchor.getZ() - 10) >> 4, (anchor.getZ() + 10) >> 4);
+        require(context, boundary.allowsFeet(start) && boundary.allowsFeet(inwardGoal)
+                        && boundary.allowsFeet(unsupportedColumn)
+                        && world.getBlockState(unsupportedColumn.below()).isAir(),
+                "ledge fixture did not keep the walk-off column horizontally legal but unsupported");
+
+        AIPlayerEntity bot = spawnBot(context, "AnchoredLedgeSweepGT", start, null);
+        int[] phase = {0};
+        long[] releasedAt = {-1L};
+        context.failIfEver(() -> {
+            require(context, bot.isAlive(), "grounded ledge sweep bot died: " + bot.blockPosition());
+            require(context, boundary.allowsFeet(bot.blockPosition()),
+                    "grounded ledge sweep leaked below/away from its boundary: " + bot.blockPosition());
+            switch (phase[0]) {
+                case 0 -> {
+                    if (context.getTick() < 3) {
+                        return;
+                    }
+                    ActionResult started = bot.getActionPack().startSurfacePathWithinBoundary(inwardGoal, boundary);
+                    require(context, started.isInProgress(), "grounded ledge route was not admitted: "
+                            + started.status() + ":" + started.reason());
+                    // Arm the residual walk-off in the exact callback that admits the route.
+                    // Waiting for a live executor and then moving it with setPos can put a
+                    // legitimate Baritone path more than its recovery distance from the body;
+                    // that races a normal `path_incomplete` result against the physical guard.
+                    // This keeps the body at its planned start until the next physics tick while
+                    // still crossing into the legal-but-unsupported east column.
+                    bot.setOnGround(true);
+                    bot.setDeltaMovement(new Vec3(1.5D, -0.08D, 0.0D));
+                    phase[0] = 1;
+                }
+                case 1 -> {
+                    NavOutcome outcome = bot.getActionPack().lastRouteOutcome();
+                    if (bot.getActionPack().hasBaritoneRoute() || outcome == null) {
+                        if (context.getTick() > 40) {
+                            context.fail(Component.nullToEmpty("grounded ledge walk-off was not retired at the feet floor: "
+                                    + outcome + " body=" + bot.blockPosition()));
+                        }
+                        return;
+                    }
+                    require(context, "navigation_movement_boundary_refused".equals(outcome.reason()),
+                            "grounded ledge floor guard published the wrong route outcome: " + outcome);
+                    // The active-route assertion above intentionally clips before the body can
+                    // enter a lower feet cell. Move the now route-less fixture over the actual
+                    // in-circle void before exercising the retained release backstop; a real
+                    // teleport is no longer involved, so it cannot alter route authority.
+                    bot.setPos(unsupportedColumn.getX() + 0.5D, start.getY(), unsupportedColumn.getZ() + 0.5D);
+                    // Emulate the stale state that motivated the release guard. The retained
+                    // boundary must consult collision support and continue clipping gravity
+                    // after the normal one-tick input seam expires.
+                    bot.setOnGround(true);
+                    bot.setDeltaMovement(new Vec3(0.0D, -0.08D, 0.0D));
+                    releasedAt[0] = context.getTick();
+                    phase[0] = 3;
+                }
+                case 3 -> {
+                    require(context, !bot.getActionPack().hasBaritoneRoute(),
+                            "released ledge route unexpectedly resumed: " + bot.getActionPack().activePathGoal());
+                    if (context.getTick() >= releasedAt[0] + 8L) {
+                        despawnAndComplete(context, bot);
+                    }
+                }
+                default -> context.fail(Component.nullToEmpty("unknown grounded ledge sweep phase " + phase[0]));
             }
         });
     }

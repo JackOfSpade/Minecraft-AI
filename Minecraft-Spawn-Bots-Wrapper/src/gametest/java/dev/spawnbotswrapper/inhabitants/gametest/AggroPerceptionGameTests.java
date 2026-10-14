@@ -1,6 +1,8 @@
 package dev.spawnbotswrapper.inhabitants.gametest;
 
 import dev.spawnbotswrapper.inhabitants.InhabitantsMod;
+import dev.spawnbotswrapper.inhabitants.combat.AggroController;
+import dev.spawnbotswrapper.inhabitants.combat.Perception;
 import dev.spawnbotswrapper.inhabitants.command.CommandServices;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.SectionPos;
@@ -12,7 +14,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Real-server tests of the perception rules of the line-of-sight hunter that need a real server: the 64 block engage
+ * Real-server tests of the perception rules of the line-of-sight hunter that need a real server: the 16 block acquisition
  * limit, hearing through vanilla's own vibration system (walking is heard, sneaking is silent, a stone wall gives a clue but
  * no notice, wool blocks the vibration, no listener leaks), and the reaction time on EVERY sighting (a loaded crossbow does
  * not fire the instant the player comes into view, a blink behind a pillar restarts the reaction, and a hit does not let
@@ -21,6 +23,11 @@ import java.util.Locale;
  */
 public final class AggroPerceptionGameTests {
     private static final String ENV = "pvpbot-inhabitants-gametest:";
+    private static final double JUST_OUTSIDE_ENGAGE_LIMIT = AggroController.ENGAGE_LIMIT + 1.0;
+    private static final double JUST_INSIDE_ENGAGE_LIMIT = AggroController.ENGAGE_LIMIT - 1.0;
+    private static final long EXPECTED_INSIDE_REACTION_TICKS = Perception.noticeTick(Perception.requiredSeconds(
+            Perception.Params.defaults(), 0.0, JUST_INSIDE_ENGAGE_LIMIT, Perception.Subject.player(false), true));
+    private static final long MINIMUM_INSIDE_REACTION_TICKS = Math.max(0L, EXPECTED_INSIDE_REACTION_TICKS - 4);
 
     private static String fmt(double v) {
         return String.format(Locale.ROOT, "%.2f", v);
@@ -29,15 +36,15 @@ public final class AggroPerceptionGameTests {
     // ------------------------------------------------------------------ the engage limit
 
     /**
-     * A player in plain view in the cone at 70 blocks is never engaged (the engage limit is 64), however long it stands
-     * there. Control: the same player at 60 blocks is engaged after its reaction time (0.5 + 1.5 * 60 / 64 = 1.9 s, 39 ticks),
-     * so the distance was the only reason.
+     * A player in plain view just beyond the 16-block acquisition limit is never engaged, however long it stands there.
+     * Control: the same player just inside the cap is engaged only after its reaction time, so the boundary itself is the
+     * only reason for the first result.
      */
     @GameTest(environment = ENV + "aggro_engage_limit", maxTicks = 500)
-    public void aggroAPlayerInPlainViewAtSeventyBlocksIsNeverEngagedButAtSixtyIs(GameTestHelper context) {
+    public void aggroAPlayerJustBeyondTheEngageLimitIsNeverEngagedButJustInsideIs(GameTestHelper context) {
         Rig rig = new Rig(context);
-        rig.buildStrip(76);
-        rig.createTarget(70.0);
+        rig.buildStrip((int) Math.ceil(JUST_OUTSIDE_ENGAGE_LIMIT) + 6);
+        rig.createTarget(JUST_OUTSIDE_ENGAGE_LIMIT);
         boolean[] dressed = {false};
         long[] dressedAt = {0};
         long[] movedAt = {-1};
@@ -49,27 +56,32 @@ public final class AggroPerceptionGameTests {
             rig.keepTargetAlive();
             if (movedAt[0] < 0) {
                 if (since == 2 && !rig.bot.hasLineOfSight(rig.target)) {
-                    rig.fail("scene broken: the player 70 blocks away is not in the bot's line of sight");
+                    rig.fail("scene broken: the player just beyond the engage limit is not in the bot's line of sight");
                 }
                 if (rig.hasTarget() || !rig.phase().equals("IDLE")) {
-                    rig.fail("the bot engaged a player 70 blocks away (the limit is 64): phase " + rig.phase() + " " + rig.trace());
+                    rig.fail("the bot engaged a player " + fmt(JUST_OUTSIDE_ENGAGE_LIMIT) + " blocks away (the limit is "
+                            + fmt(AggroController.ENGAGE_LIMIT) + "): phase " + rig.phase() + " " + rig.trace());
                 }
                 if (since >= 100) {
-                    rig.placeTargetAt(rig.homeX() + 60.0, rig.bot.getY(), rig.homeZ());
+                    rig.placeTargetAt(rig.homeX() + JUST_INSIDE_ENGAGE_LIMIT, rig.bot.getY(), rig.homeZ());
                     movedAt[0] = context.getTick();
-                    Rig.LOG.info("[engage-limit] never engaged at 70 blocks for {} ticks; the player steps to 60 blocks", since);
+                    Rig.LOG.info("[engage-limit] never engaged at {} blocks for {} ticks; the player steps to {} blocks",
+                            fmt(JUST_OUTSIDE_ENGAGE_LIMIT), since, fmt(JUST_INSIDE_ENGAGE_LIMIT));
                 }
                 return;
             }
             long n = context.getTick() - movedAt[0];
             if (rig.hasTarget()) {
-                Rig.LOG.info("[engage-limit] engaged {} ticks after the player came within 64 blocks (0.5 + 1.5 * 60 / 64 = 1.9 s = 39 ticks)", n);
-                if (n < 34) {
-                    rig.fail("the bot engaged a player 60 blocks away after only " + n + " ticks: the reaction time is 39 ticks");
+                Rig.LOG.info("[engage-limit] engaged {} ticks after the player came within {} blocks (the reaction time is about {} ticks)",
+                        n, fmt(AggroController.ENGAGE_LIMIT), EXPECTED_INSIDE_REACTION_TICKS);
+                if (n < MINIMUM_INSIDE_REACTION_TICKS) {
+                    rig.fail("the bot engaged a player " + fmt(JUST_INSIDE_ENGAGE_LIMIT) + " blocks away after only " + n
+                            + " ticks: the reaction time is about " + EXPECTED_INSIDE_REACTION_TICKS + " ticks");
                 }
                 rig.succeed();
             } else if (n > 120) {
-                rig.fail("the bot never engaged a player 60 blocks away in plain view; phase " + rig.phase() + " " + rig.trace());
+                rig.fail("the bot never engaged a player " + fmt(JUST_INSIDE_ENGAGE_LIMIT)
+                        + " blocks away in plain view; phase " + rig.phase() + " " + rig.trace());
             }
         });
     }

@@ -52,14 +52,18 @@ final class FollowRecoverySourceContractTest {
         assertTrue(steeringBranch >= 0 && fullLook > steeringBranch
                         && fullLook == follow.lastIndexOf("CombatCore.lookAt(bot, target)"),
                 "the full body-yaw look-at is only allowed when nothing is navigating");
-        // Arrival must cancel the Baritone route, not merely release the keys.
+        // Arrival must release Baritone navigation ownership, not merely release the keys. The
+        // shared release path cancels an active route and also preempts a just-settled bounded
+        // handoff, so a stale continuation cannot drive after follow begins holding position.
         int arrival = follow.indexOf("bot.distanceTo(target) <= STOP_DISTANCE + STOP_ARRIVAL_SLACK");
         int arrivalStop = follow.indexOf("pack.stopNavigation();", arrival);
         assertTrue(arrival >= 0 && arrivalStop > arrival && arrivalStop < follow.indexOf("waiting = true;", arrival),
                 "the arrived branch must cancel the active route before holding position");
         assertTrue(pack.contains("public void stopNavigation()")
-                        && pack.contains("cancelBaritoneRoute(\"stop_navigation\")"),
-                "stopNavigation must end the Baritone route");
+                        && pack.contains("releaseBaritone(\"stop_navigation\");")
+                        && pack.contains("boolean cancelled = route != null && cancelBaritoneRoute(why);")
+                        && pack.contains("BaritoneRegistry.INSTANCE.preempt(player, why)"),
+                "stopNavigation must cancel an active Baritone route and preempt a settled handoff");
         assertFalse(follow.contains("FollowDirectWalk.verify(") && !follow.contains("follow_direct_walk"),
                 "dry-land follow has no direct-walk fallback behind Baritone");
         assertTrue(follow.contains("private static final double BOAT_SHORE_STANDOFF = 2.0D;")
@@ -105,6 +109,14 @@ final class FollowRecoverySourceContractTest {
                         && recovery.contains("MiningSafety.SELF_SUPPORT")
                         && recovery.contains("MiningSafety.SupportOccupancy.SELF"),
                 "only a current Baritone self-support break refusal may enter this recovery");
+        int routeStart = recovery.indexOf("void markRouteStarted(AIPlayerEntity bot)");
+        int perRouteWatermarkReset = recovery.indexOf("lastHandledRefusalTick = Integer.MIN_VALUE;", routeStart);
+        assertTrue(follow.contains("selfSupportRecovery.markRouteStarted(bot);")
+                        && recovery.contains("routeStartCursor")
+                        && recovery.contains("firstRefusalAfterCursor")
+                        && recovery.contains("refusals.get(index) == cursor")
+                        && perRouteWatermarkReset > routeStart,
+                "a self-support recovery may consume only a refusal from the Baritone route that just started, never a bot-lifetime ledger entry");
         assertTrue(recovery.contains("miner.naturalTerrainOnly(true)")
                         && recovery.contains("miner.begin(bot, target)")
                         && recovery.contains("miner.tick(bot)"),

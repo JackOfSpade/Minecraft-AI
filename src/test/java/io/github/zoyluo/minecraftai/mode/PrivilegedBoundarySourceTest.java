@@ -26,6 +26,7 @@ class PrivilegedBoundarySourceTest {
     void directTeleportsStayInsideReviewedAdapters() throws IOException {
         Set<String> expected = Set.of(
                 "entity/AIPlayerEntity.java", // only the super delegation of the teleport overrides that end a fall (no teleport of its own)
+                "command/MinecraftAiCommand.java",
                 "manager/AIPlayerManager.java",
                 "network/MinecraftAiServerNetworking.java",
                 "task/DangerWatcher.java",
@@ -40,7 +41,8 @@ class PrivilegedBoundarySourceTest {
                 assertTrue(!entry.getValue().replace("super.teleportTo(", "").contains(".teleportTo("), "AIPlayerEntity only delegates to super");
                 continue;
             }
-            if (entry.getKey().equals("manager/AIPlayerManager.java")) {
+            if (entry.getKey().equals("manager/AIPlayerManager.java")
+                    || entry.getKey().equals("command/MinecraftAiCommand.java")) {
                 continue;
             }
             assertTrue(entry.getValue().contains("CapabilityRuntime"), entry.getKey());
@@ -231,8 +233,9 @@ class PrivilegedBoundarySourceTest {
         int exactResult = inFlight.indexOf("WalkedStep.Result result = pack.stepResultFor(admission.lease());", exactLease);
         int strictLanding = inFlight.indexOf("boolean completedStrictLanding =", exactResult);
         int emergencyRelease = inFlight.indexOf("releaseRescueStep(bot, false);", exactLease);
-        int capabilityMismatch = inFlight.indexOf("admission.hiddenWorldScan() != hiddenWaterScan");
-        int corridorMismatch = inFlight.indexOf("!withinRescueStepContinuationEnvelope(");
+        int continuationProof = inFlight.indexOf("boolean withinContinuation = withinRescueStepContinuationEnvelope(");
+        int capabilityMismatch = inFlight.indexOf("admission.hiddenWorldScan() != hiddenWaterScan", continuationProof);
+        int corridorMismatch = inFlight.indexOf("(!withinContinuation && !currentDrift)", capabilityMismatch);
         int ownerCancel = inFlight.indexOf("releaseRescueStep(bot, true);", corridorMismatch);
         String strictCompletion = inFlight.substring(strictLanding, emergencyRelease);
         String completionCleanup = inFlight.substring(emergencyRelease, capabilityMismatch);
@@ -241,7 +244,7 @@ class PrivilegedBoundarySourceTest {
         int strictFrontierClear = completionCleanup.indexOf("strictWaterEscapeSearches.remove(bot.getUUID());",
                 conditionalFrontierClear);
         assertTrue(exactLease >= 0 && exactResult > exactLease && strictLanding > exactResult
-                        && emergencyRelease > strictLanding && capabilityMismatch > emergencyRelease
+                        && emergencyRelease > strictLanding && continuationProof > emergencyRelease && capabilityMismatch > continuationProof
                         && corridorMismatch > capabilityMismatch && ownerCancel > corridorMismatch
                         && strictCompletion.contains("!admission.hiddenWorldScan()")
                         && strictCompletion.contains("!hiddenWaterScan")
@@ -263,11 +266,13 @@ class PrivilegedBoundarySourceTest {
                         && releaseRescue.contains("bot.getActionPack().releaseStepLease(admission.lease())"),
                 "NavSafetyNet may release a retained strict fence only through the exact rescue admission lease");
         int guard = safety.indexOf("private static boolean canContinueRescueStep(");
+        int guardContinuationProof = safety.indexOf("boolean withinContinuation = withinRescueStepContinuationEnvelope(", guard);
         int guardDestination = safety.indexOf("!step.cell().equals(admission.destination())", guard);
-        int guardCorridor = safety.indexOf("withinRescueStepContinuationEnvelope(feet, admission, step.kind(), step.ticks())", guard);
+        int guardCorridor = safety.indexOf("(!withinContinuation && !currentDrift)", guardDestination);
         int currentDriftProof = safety.indexOf("observedWaterEscapeCell(bot, bot.level(), feet, false) != WaterEscapeCell.WATER", guard);
         int continuationEnvelope = safety.indexOf("private static boolean withinRescueStepContinuationEnvelope(", guard);
-        assertTrue(guard >= 0 && guardDestination > guard && guardCorridor > guardDestination && currentDriftProof > guardCorridor
+        assertTrue(guard >= 0 && guardContinuationProof > guard && guardDestination > guardContinuationProof && guardCorridor > guardDestination
+                        && currentDriftProof > guardCorridor
                         && continuationEnvelope > guard
                         && safety.contains("withinRescueStepCorridor(feet, admission.origin(), admission.destination())")
                         && safety.contains("isNormalizableDryWalk(kind)")

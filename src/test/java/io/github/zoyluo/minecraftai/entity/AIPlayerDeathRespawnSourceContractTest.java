@@ -1,5 +1,6 @@
 package io.github.zoyluo.minecraftai.entity;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -28,5 +29,20 @@ final class AIPlayerDeathRespawnSourceContractTest {
         assertTrue(entity.contains("ensureMinecraftAiEntityTracked()")
                         && entity.contains("minecraftai$addEntity(this)"),
                 "retained fake players need their missing ChunkMap entity tracker restored before owner pairing");
+    }
+
+    @Test
+    void deathRetainsInventoryAndDropsXpOnlyWhenKeepInventoryIsDisabled() throws IOException {
+        String entity = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/entity/AIPlayerEntity.java"));
+        int method = entity.indexOf("protected void dropAllDeathLoot(ServerLevel level, DamageSource source)");
+        int end = entity.indexOf("\n    @Override", method);
+        assertTrue(method >= 0 && end > method, "the bot must own its death-loot boundary");
+        String body = entity.substring(method, end);
+        assertTrue(body.contains("if (!level.getGameRules().get(GameRules.KEEP_INVENTORY))"),
+                "retained XP must not duplicate while keepInventory is enabled");
+        assertTrue(body.contains("this.dropExperience(level, source.getEntity());"),
+                "drop XP through the focused vanilla path when the rule permits it");
+        assertFalse(body.contains("super.dropAllDeathLoot") || body.contains("dropEquipment("),
+                "the focused XP call must not re-enter inventory, equipment, or grave-hook handling");
     }
 }

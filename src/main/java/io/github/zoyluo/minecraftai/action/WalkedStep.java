@@ -531,8 +531,24 @@ public final class WalkedStep {
 
     private Result fail(String why) {
         failure = why;
+        // Snapshot controller state before end() releases the keys.  A failed physical action is
+        // the one place where this context is needed to distinguish an unavailable input from an
+        // obstruction/current that defeated an input the controller really did apply.
+        Vec3 failureVelocity = bot.getDeltaMovement();
+        float failureForward = bot.zza;
+        float failureStrafe = bot.xxa;
+        float failureYaw = bot.getYRot();
+        boolean failureSprinting = bot.isSprinting();
+        boolean failureInWater = bot.isInWater();
+        boolean failureHardCollision = bot.horizontalCollision && !bot.minorHorizontalCollision;
+        Gait failurePace = bot.getActionPack().lastPaceGait();
         end(false);
-        BotLog.action(bot, "walked_step_failed", "kind", kind, "reason", reason, "why", why, "ticks", ticks);
+        BotLog.action(bot, "walked_step_failed", "kind", kind, "reason", reason, "why", why, "ticks", ticks,
+                "feet", bot.blockPosition().toShortString(), "position", bot.position(),
+                "target", point, "velocity", failureVelocity,
+                "forward", failureForward, "strafe", failureStrafe, "yaw", failureYaw,
+                "sprinting", failureSprinting, "in_water", failureInWater,
+                "hard_collision", failureHardCollision, "pace", failurePace);
         finalResult = Result.failed(why);
         return finalResult;
     }

@@ -30,6 +30,11 @@ public final class LightAreaTask extends AbstractTask {
     private final int radius;
     private final int maxTorches;
     private final boolean skipSurfaceCells;
+    /**
+     * A dark-trap recovery must light the cell the companion is standing in before considering
+     * the wider area. Ordinary automatic lighting deliberately skips that occupied cell.
+     */
+    private final boolean prioritizeOrigin;
     // The fixed pool of observable, dark, placeable floor cells within radius. Computed exactly
     // once (in scan()), never rescanned mid-task: this is what keeps each decision cheap even
     // though it drives every subsequent torch choice via TorchPlacementPlanner's prediction.
@@ -52,13 +57,19 @@ public final class LightAreaTask extends AbstractTask {
     private int threshold;
 
     public LightAreaTask(int radius, int maxTorches) {
-        this(radius, maxTorches, false);
+        this(radius, maxTorches, false, false);
     }
 
     private LightAreaTask(int radius, int maxTorches, boolean skipSurfaceCells) {
+        this(radius, maxTorches, skipSurfaceCells, false);
+    }
+
+    private LightAreaTask(int radius, int maxTorches, boolean skipSurfaceCells,
+                          boolean prioritizeOrigin) {
         this.radius = Math.max(2, radius);
         this.maxTorches = Math.max(1, maxTorches);
         this.skipSurfaceCells = skipSurfaceCells;
+        this.prioritizeOrigin = prioritizeOrigin;
     }
 
     /**
@@ -69,6 +80,15 @@ public final class LightAreaTask extends AbstractTask {
      */
     static LightAreaTask automatic(int radius, int maxTorches) {
         return new LightAreaTask(radius, maxTorches, true);
+    }
+
+    /**
+     * One-cell safety recovery for a companion that is stuck in a dark pocket. The ordinary
+     * automatic scan omits the occupied origin; this variant proves and lights it first, then
+     * falls back to another observable nearby floor only if that exact placement cannot happen.
+     */
+    static LightAreaTask automaticDarkTrap() {
+        return new LightAreaTask(2, 1, true, true);
     }
 
     @Override
@@ -141,9 +161,9 @@ public final class LightAreaTask extends AbstractTask {
         }
         BlockPos.betweenClosedStream(origin.offset(-radius, -2, -radius), origin.offset(radius, 3, radius))
                 .map(BlockPos::immutable)
-                .filter(pos -> !pos.equals(origin) && !pos.equals(origin.above()))
+                .filter(pos -> !pos.equals(origin.above()) && (prioritizeOrigin || !pos.equals(origin)))
                 .filter(pos -> io.github.zoyluo.minecraftai.mode.ObservableWorldQuery.canObserveCollider(bot, pos.below()))
-                .filter(pos -> isDarkFloorCell(world, pos, threshold, skipSurfaceCells))
+                .filter(pos -> isDarkFloorCell(world, pos, threshold, skipSurfaceCells, prioritizeOrigin))
                 .forEach(pos -> {
                     cells.add(pos);
                     worldBlockLight.put(pos, world.getBrightness(LightLayer.BLOCK, pos));
@@ -169,11 +189,16 @@ public final class LightAreaTask extends AbstractTask {
     private void pickNextTarget(AIPlayerEntity bot) {
         Set<BlockPos> available = new LinkedHashSet<>(cells);
         available.removeAll(excluded);
-        target = skipSurfaceCells
-                ? TorchPlacementPlanner.chooseDarkest(
-                        available, worldRawLight, worldBlockLight, bot.blockPosition())
-                : TorchPlacementPlanner.chooseNext(
-                        available, worldBlockLight, placedTorches, bot.blockPosition(), threshold);
+        BlockPos origin = bot.blockPosition();
+        if (prioritizeOrigin && available.contains(origin)) {
+            target = origin;
+        } else {
+            target = skipSurfaceCells
+                    ? TorchPlacementPlanner.chooseDarkest(
+                            available, worldRawLight, worldBlockLight, origin)
+                    : TorchPlacementPlanner.chooseNext(
+                            available, worldBlockLight, placedTorches, origin, threshold);
+        }
         standPos = null;
         phase = target == null ? Phase.DONE : Phase.WALK;
     }
@@ -183,10 +208,10 @@ public final class LightAreaTask extends AbstractTask {
             pickNextTarget(bot);
             return;
         }
-        if (skipSurfaceCells && (!AutomaticLighting.isPotentialHostileSpawnDark(bot.level(), target)
+        if (skipSurfaceCells && (!isAutomaticDarkFloorCell(bot.level(), target, prioritizeOrigin)
                 || SurfaceCheck.isOnSurface(bot.level(), target))) {
-            // A previous torch or daylight can settle while the navigation task is walking.  Do
-            // not spend another torch on a cell that is no longer a native spawn risk.
+            // A previous torch or daylight can settle while the navigation task is walking. Do
+            // not spend another torch once this task's safety predicate is satisfied.
             excluded.add(target);
             target = null;
             return;
@@ -225,7 +250,7 @@ public final class LightAreaTask extends AbstractTask {
 
     private void place(AIPlayerEntity bot) {
         if (skipSurfaceCells && (target == null
-                || !AutomaticLighting.isPotentialHostileSpawnDark(bot.level(), target)
+                || !isAutomaticDarkFloorCell(bot.level(), target, prioritizeOrigin)
                 || SurfaceCheck.isOnSurface(bot.level(), target))) {
             if (target != null) {
                 excluded.add(target);
@@ -267,12 +292,28 @@ public final class LightAreaTask extends AbstractTask {
      * the same floor/air test the old scan() used, now also the definition of a "dark spawnable
      * cell" that {@link TorchPlacementPlanner} tries to bring up to the threshold.
      */
-    private static boolean isDarkFloorCell(Level world, BlockPos pos, int threshold, boolean automatic) {
+    private static boolean isDarkFloorCell(Level world, BlockPos pos, int threshold, boolean automatic,
+                                           boolean darkTrapRecovery) {
         return world.getBlockState(pos).isAir()
                 && !world.getBlockState(pos.below()).isAir()
                 && (automatic
-                ? AutomaticLighting.isPotentialHostileSpawnDark(world, pos)
+                ? isAutomaticDarkFloorCell(world, pos, darkTrapRecovery)
                 : world.getBrightness(LightLayer.BLOCK, pos) < threshold);
+    }
+
+    /**
+     * Ordinary autonomous lighting tracks the game's current monster-spawn rule. A trapped bot
+     * has a stricter safety contract, however: the detector fires below {@link
+     * DangerWatcher#DARK_TRAP_LIGHT}, including worlds whose spawn block-light limit is zero.
+     * Keep that predicate symmetric with {@link DangerWatcher#isDarkTrapCell(Level, BlockPos)}
+     * while the caller continues to apply the shared underground/surface filter.
+     */
+    private static boolean isAutomaticDarkFloorCell(Level world, BlockPos pos, boolean darkTrapRecovery) {
+        if (!darkTrapRecovery) {
+            return AutomaticLighting.isPotentialHostileSpawnDark(world, pos);
+        }
+        return world.getBrightness(LightLayer.BLOCK, pos) < DangerWatcher.DARK_TRAP_LIGHT
+                && world.getMaxLocalRawBrightness(pos, world.getSkyDarken()) < DangerWatcher.DARK_TRAP_LIGHT;
     }
 
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {

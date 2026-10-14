@@ -301,7 +301,11 @@ interface DetourHost {
      */
     FluidProbe probeFluidAround(BlockPos cell);
 
-    /** The observed-occupancy reachability precheck from {@code from} to {@code to} (design 4.3): {@code ObservedReach.search} over the bot's window; INCONCLUSIVE when the bot has no window yet. */
+    /**
+     * The observed-occupancy reachability precheck from {@code from} to {@code to} (design 4.3). Implementations
+     * use strict {@code ObservedReach.search} unless both endpoint stands have just been independently re-proven
+     * from live observable world state; that narrow case may downgrade stale endpoint evidence to INCONCLUSIVE.
+     */
     ObservedReach.Result observedReach(BlockPos from, BlockPos to);
 
     /** {@code OreScan.veinFrom(bot, seed, OreScan.oreFamily(block), cap)}: up to {@code cap} observed same-block cells of the vein of {@code seed}, seed included; empty when the seed is not observable. Called once at the start. */

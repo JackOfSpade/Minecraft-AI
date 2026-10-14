@@ -13,10 +13,14 @@ import baritone.pathing.movement.movements.MovementFall;
 import baritone.pathing.movement.movements.MovementParkour;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionPack;
+import io.github.zoyluo.minecraftai.action.ActionPack.MovementInputs;
 import io.github.zoyluo.minecraftai.action.Gait;
 import io.github.zoyluo.minecraftai.action.PacePolicy;
 import io.github.zoyluo.minecraftai.action.PaceRules;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
+import io.github.zoyluo.minecraftai.task.FollowTask;
+import io.github.zoyluo.minecraftai.task.TaskManager;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 
@@ -51,8 +55,14 @@ final class BotInputBridge {
     static final float SNEAK_SCALE = PaceRules.SNEAK_SCALE;
     /** How many movements ahead of a parkour jump still count as its run-up. */
     private static final int PARKOUR_RUN_UP_MOVEMENTS = 2;
+    /** A re-admitted follow route gets one calculation-only physics tick to receive its predecessor's direction. */
+    private static final int FOLLOW_HANDOFF_TICKS = 1;
 
     private BotInputBridge() {
+    }
+
+    /** One executor tick's real world-space keys and gait, retained only across a safe follow re-goal seam. */
+    private record FollowHandoff(MovementInputs inputs, boolean sprinting) {
     }
 
     /** Writes Baritone's held inputs into the bot. Called every tick, before the bot's physics. */
@@ -67,9 +77,30 @@ final class BotInputBridge {
 
         float forward = (forwardKey ? 1.0F : 0.0F) - (backKey ? 1.0F : 0.0F);
         float left = (leftKey ? 1.0F : 0.0F) - (rightKey ? 1.0F : 0.0F);
+        BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
+        IPathExecutor executor = baritone.getPathingBehavior().getCurrent();
+        boolean executorSuppliedDirection = executor != null && (forward != 0.0F || left != 0.0F);
+        boolean handoffSprinting = false;
+        if (!executorSuppliedDirection && !jump && !sneak && executor == null
+                && baritone.getPathingBehavior().getInProgress().isPresent()) {
+            // A fresh path calculation deliberately owns the bot (so no local controller may
+            // race it), but has not reached an executor that can force keys yet.  Carry exactly
+            // one genuine FollowTask direction through that seam.  The pace calculation below
+            // still applies the current item-use slowdown, so a newly raised shield gets 0.2
+            // rather than the predecessor's unscaled input.
+            FollowHandoff continuation = takeFollowHandoff(bot, entry);
+            if (continuation != null) {
+                forward = continuation.inputs().forward();
+                left = continuation.inputs().strafing();
+                handoffSprinting = continuation.sprinting();
+            }
+        }
         MinecraftAiConfig.Pace config = MinecraftAiConfig.get().behaviour().paceOrDefaults();
         if (!config.paceEnabled()) {
-            applyUnpaced(bot, baritone, forward, left, jump, sneak);
+            applyUnpaced(bot, baritone, forward, left, jump, sneak, handoffSprinting);
+            if (executorSuppliedDirection) {
+                rememberActualDirection(entry, forward, left, bot.getYRot(), bot.isSprinting());
+            }
             return;
         }
 
@@ -85,16 +116,20 @@ final class BotInputBridge {
         bot.xxa = left * scale;
         bot.setJumping(jump);
         bot.setShiftKeyDown(effectiveSneak);
-        boolean sprint = sprintWanted(baritone)
+        boolean sprint = (sprintWanted(baritone) || handoffSprinting)
                 && PaceRules.sprintAllowed(bot, forward, effectiveSneak)
                 && (movement.parkour || gait == Gait.SPRINT);
         bot.setSprinting(sprint);
         pack.noteEnforced(effectiveSneak ? Gait.SNEAK : sprint ? Gait.SPRINT : Gait.WALK, scale, usingItemSlow);
+        if (executorSuppliedDirection) {
+            rememberActualDirection(entry, forward, left, bot.getYRot(), sprint);
+        }
     }
 
     /** {@code pace.enabled=false}: what the bridge did before the pace policy. */
-    private static void applyUnpaced(AIPlayerEntity bot, IBaritone baritone, float forward, float left, boolean jump, boolean sneak) {
-        boolean sprint = sprintWanted(baritone) && PaceRules.sprintAllowed(bot, forward, sneak);
+    private static void applyUnpaced(AIPlayerEntity bot, IBaritone baritone, float forward, float left, boolean jump, boolean sneak,
+                                     boolean handoffSprinting) {
+        boolean sprint = (sprintWanted(baritone) || handoffSprinting) && PaceRules.sprintAllowed(bot, forward, sneak);
         if (sneak) {
             forward *= PaceRules.SNEAK_SCALE;
             left *= PaceRules.SNEAK_SCALE;
@@ -104,6 +139,85 @@ final class BotInputBridge {
         bot.setJumping(jump);
         bot.setShiftKeyDown(sneak);
         bot.setSprinting(sprint);
+    }
+
+    /** Records a real executor's raw keys; a zero/turning tick never erases the last direction. */
+    private static void rememberActualDirection(BaritoneRegistry.Entry entry, float forward, float left, float yaw, boolean sprinting) {
+        if (entry == null) {
+            return;
+        }
+        entry.lastBridgeForward = forward;
+        entry.lastBridgeStrafing = left;
+        entry.lastBridgeYaw = yaw;
+        entry.lastBridgeSprinting = sprinting;
+        NavRoute route = entry.observedRoute;
+        entry.lastBridgeRoute = route;
+        entry.hasLastBridgeDirection = true;
+        clearFollowHandoff(entry);
+    }
+
+    /**
+     * Consumes the natural-follow handoff only while a newly admitted FollowTask route is still
+     * live and Baritone is calculating rather than executing it.  A cancelled/arrived route is
+     * never given a stale key, and the one-use receipt cannot turn a long calculation into a
+     * local movement controller.
+     */
+    private static FollowHandoff takeFollowHandoff(AIPlayerEntity bot, BaritoneRegistry.Entry entry) {
+        if (entry == null || !entry.followHandoffAvailable
+                || bot.getServer().getTickCount() > entry.followHandoffExpiresAt
+                || !(TaskManager.INSTANCE.getActive(bot).orElse(null) instanceof FollowTask)
+                || !isLevelFollowHandoff(bot, entry, entry.observedRoute)
+                || !bot.getActionPack().hasBaritoneRoute()) {
+            clearFollowHandoff(entry);
+            return null;
+        }
+        FollowHandoff continuation = new FollowHandoff(
+                ActionPack.reprojectControllerInputs(entry.followHandoffForward, entry.followHandoffStrafing,
+                        entry.followHandoffYaw, bot.getYRot()),
+                entry.followHandoffSprinting);
+        // It is a receipt, not a local controller: consume every part of it before physics can
+        // observe the reprojected direction.
+        clearFollowHandoff(entry);
+        return continuation;
+    }
+
+    /** The three route labels FollowTask may admit on land; boat/swim children use other route kinds. */
+    private static boolean isLandFollowRoute(NavRoute route) {
+        return route != null && switch (route.label()) {
+            case "approach", "owner_follow", "directional_pursuit" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * The route-level prerequisite shared by the receipt issuer and consumer. Owner follow may
+     * legitimately swim while it is executing, but a preserved horizontal key is land-only.
+     * Directional pursuit keeps its remote target only as heading metadata, so its local resolved
+     * hop—not that remote target—must be level with the bot before continuity is allowed.
+     */
+    static boolean isLevelDryFollowHandoffRoute(NavRoute route, int feetY, boolean inWater) {
+        if (!isLandFollowRoute(route) || inWater) {
+            return false;
+        }
+        BlockPos localGoal = route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT
+                ? route.resolvedGoal() : route.target();
+        return localGoal != null && localGoal.getY() == feetY;
+    }
+
+    /**
+     * The carry key is horizontal-only. It is safe only when both the route that released it and
+     * the newly admitted route are dry and level at the same supported feet cell. In particular, a
+     * {@code GoalNear} whose target is below (or above) the bot must wait for its own executor:
+     * an inherited horizontal key can otherwise enter the goal sphere before the planned drop or
+     * climb has actually happened.
+     */
+    private static boolean isLevelFollowHandoff(AIPlayerEntity bot, BaritoneRegistry.Entry entry, NavRoute route) {
+        if (!bot.onGround() || bot.onClimbable()) {
+            return false;
+        }
+        int feetY = bot.blockPosition().getY();
+        return entry.followHandoffFeetY == feetY
+                && isLevelDryFollowHandoffRoute(route, feetY, bot.isInWater());
     }
 
     /** Horizontal distance to the goal of the route this pack runs, NaN when a direct Baritone caller drives the bot. */
@@ -158,12 +272,81 @@ final class BotInputBridge {
         }
     }
 
+    /**
+     * Lets go of everything after a natural route completion, retaining only the final real
+     * FollowTask direction for a one-tick calculation handoff. Explicit cancellations/preemption
+     * use {@link #release(AIPlayerEntity)} instead and always clear it.
+     */
+    static void releaseForFollowHandoff(AIPlayerEntity bot) {
+        BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
+        NavRoute sourceRoute = entry == null ? null : entry.observedRoute;
+        if (entry != null && entry.hasLastBridgeDirection && sourceRoute != null
+                && entry.lastBridgeRoute == sourceRoute
+                && TaskManager.INSTANCE.getActive(bot).orElse(null) instanceof FollowTask
+                && isLevelFollowHandoffAtRelease(bot, sourceRoute)
+                && isNaturalFollowHandoffCompletion(BaritoneNavigator.progress(bot, sourceRoute))) {
+            entry.followHandoffForward = entry.lastBridgeForward;
+            entry.followHandoffStrafing = entry.lastBridgeStrafing;
+            entry.followHandoffYaw = entry.lastBridgeYaw;
+            entry.followHandoffSprinting = entry.lastBridgeSprinting;
+            entry.followHandoffFeetY = bot.blockPosition().getY();
+            entry.followHandoffAvailable = true;
+            entry.followHandoffExpiresAt = bot.getServer().getTickCount() + FOLLOW_HANDOFF_TICKS;
+        } else {
+            clearFollowHandoff(entry);
+        }
+        neutralize(bot);
+    }
+
+    /** Only a navigator-confirmed arrival can issue continuity; ended-short and revoked routes must neutralize. */
+    static boolean isNaturalFollowHandoffCompletion(NavRoute.Progress progress) {
+        return progress == NavRoute.Progress.ARRIVED;
+    }
+
+    /** The source route must also have ended dry, level, and supported before it can issue a receipt. */
+    private static boolean isLevelFollowHandoffAtRelease(AIPlayerEntity bot, NavRoute route) {
+        return bot.onGround() && !bot.onClimbable()
+                && isLevelDryFollowHandoffRoute(route, bot.blockPosition().getY(), bot.isInWater());
+    }
+
     /** Lets go of everything: no movement input, no jump, no sneak, no sprint. */
     static void release(AIPlayerEntity bot) {
+        BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
+        clearFollowInputContinuity(entry);
+        neutralize(bot);
+    }
+
+    private static void neutralize(AIPlayerEntity bot) {
         bot.zza = 0.0F;
         bot.xxa = 0.0F;
         bot.setJumping(false);
         bot.setShiftKeyDown(false);
         bot.setSprinting(false);
+    }
+
+    static void clearFollowInputContinuity(BaritoneRegistry.Entry entry) {
+        if (entry == null) {
+            return;
+        }
+        entry.lastBridgeForward = 0.0F;
+        entry.lastBridgeStrafing = 0.0F;
+        entry.lastBridgeYaw = 0.0F;
+        entry.lastBridgeSprinting = false;
+        entry.lastBridgeRoute = null;
+        entry.hasLastBridgeDirection = false;
+        clearFollowHandoff(entry);
+    }
+
+    private static void clearFollowHandoff(BaritoneRegistry.Entry entry) {
+        if (entry == null) {
+            return;
+        }
+        entry.followHandoffForward = 0.0F;
+        entry.followHandoffStrafing = 0.0F;
+        entry.followHandoffYaw = 0.0F;
+        entry.followHandoffSprinting = false;
+        entry.followHandoffFeetY = Integer.MIN_VALUE;
+        entry.followHandoffAvailable = false;
+        entry.followHandoffExpiresAt = Integer.MIN_VALUE;
     }
 }

@@ -47,6 +47,8 @@ public final class NavRoute {
         ENDED_SHORT,
         /** A target remembered from an earlier view could not be visibly re-proven on arrival. */
         OBSERVATION_LOST,
+        /** Entity-level collision/momentum containment stopped this route before its body escaped its declared boundary. */
+        MOVEMENT_BOUNDARY_REFUSED,
         /** Baritone still drives it, but the strict-survival rules have refused its breaks/placements too many times in a row. */
         POLICY_REFUSED
     }
@@ -98,6 +100,11 @@ public final class NavRoute {
     private final int minimumY;
     /** Optional observed-only return proof anchor for a constrained route. */
     private final BlockPos returnAnchor;
+    /**
+     * Optional immutable boundary for every navigation column and movement feet position on this
+     * route. Unlike {@link #returnAnchor}, this constrains the outbound route itself.
+     */
+    private final MovementBoundary movementBoundary;
     /** Set by the observation admission boundary; remembered targets require a live proof before arrival. */
     private boolean revalidateRememberedTarget;
     /**
@@ -122,16 +129,26 @@ public final class NavRoute {
     private Object goalHandle;
 
     public NavRoute(Shape shape, BlockPos target, int radius, Options options, String label, int startTick) {
-        this(shape, target, radius, options, label, startTick, Integer.MIN_VALUE, null, null);
+        this(shape, target, radius, options, label, startTick, Integer.MIN_VALUE, null, null, null);
     }
 
     public NavRoute(Shape shape, BlockPos target, int radius, Options options, String label, int startTick,
                     int minimumY, BlockPos returnAnchor) {
-        this(shape, target, radius, options, label, startTick, minimumY, returnAnchor, null);
+        this(shape, target, radius, options, label, startTick, minimumY, returnAnchor, null, null);
+    }
+
+    /**
+     * Creates a route with a circular horizontal movement boundary in addition to its normal
+     * floor/return constraints. The boundary is carried to both the Baritone planner and the
+     * pre-execution safety checks; it is not merely an endpoint preference.
+     */
+    public NavRoute(Shape shape, BlockPos target, int radius, Options options, String label, int startTick,
+                    int minimumY, BlockPos returnAnchor, MovementBoundary movementBoundary) {
+        this(shape, target, radius, options, label, startTick, minimumY, returnAnchor, null, movementBoundary);
     }
 
     private NavRoute(Shape shape, BlockPos target, int radius, Options options, String label, int startTick,
-                     int minimumY, BlockPos returnAnchor, UUID ownerUuid) {
+                     int minimumY, BlockPos returnAnchor, UUID ownerUuid, MovementBoundary movementBoundary) {
         this.shape = shape;
         this.target = target.immutable();
         this.radius = Math.max(0, radius);
@@ -141,6 +158,7 @@ public final class NavRoute {
         this.minimumY = minimumY;
         this.returnAnchor = returnAnchor == null ? null : returnAnchor.immutable();
         this.ownerUuid = ownerUuid;
+        this.movementBoundary = movementBoundary;
         this.deadlineTick = startTick + 600;
     }
 
@@ -153,7 +171,7 @@ public final class NavRoute {
             throw new IllegalArgumentException("ownerUuid is required for owner follow");
         }
         return new NavRoute(Shape.OWNER_FOLLOW, target, radius, Options.BREAK_AND_SWIM, label, startTick,
-                Integer.MIN_VALUE, null, ownerUuid);
+                Integer.MIN_VALUE, null, ownerUuid, null);
     }
 
     public Shape shape() {
@@ -194,6 +212,60 @@ public final class NavRoute {
     /** The optional surface-route anchor that must have an all-observed return corridor before admission. */
     public BlockPos returnAnchor() {
         return returnAnchor;
+    }
+
+    /** The optional circular/floor boundary that every planned/executed movement feet cell must satisfy. */
+    public MovementBoundary movementBoundary() {
+        return movementBoundary;
+    }
+
+    /** True for ordinary routes, or when this cell remains inside the route's immutable movement boundary. */
+    public boolean allowsMovementCell(int x, int y, int z) {
+        return movementBoundary == null || movementBoundary.allowsFeet(x, y, z);
+    }
+
+    /**
+     * Whether a declared break/place cell stays in the route's horizontal site. Action cells are
+     * deliberately not subject to the feet floor: a legal ascent may break or place its support
+     * below the lowest permitted body cell, but no action may reach into a neighbouring column
+     * outside the defensive circle.
+     */
+    public boolean allowsMovementActionCell(BlockPos position) {
+        return position != null && (movementBoundary == null
+                || movementBoundary.allowsColumn(position.getX(), position.getZ()));
+    }
+
+    /**
+     * Immutable inclusive circular footprint in block-cell coordinates. A radius boundary is
+     * deliberately separates horizontal columns from feet: support below an allowed feet cell is
+     * still a legitimate planner read, while a route's actual body may never cross below
+     * {@code minimumFeetY}.
+     */
+    public record MovementBoundary(BlockPos anchor, int horizontalRadius, int minimumFeetY) {
+        public MovementBoundary {
+            anchor = java.util.Objects.requireNonNull(anchor, "anchor").immutable();
+            if (horizontalRadius < 0) {
+                throw new IllegalArgumentException("horizontalRadius must be non-negative");
+            }
+        }
+
+        /** Whether a terrain/navigation column stays inside the inclusive circle. */
+        public boolean allowsColumn(int x, int z) {
+            long dx = (long) x - anchor.getX();
+            long dz = (long) z - anchor.getZ();
+            long radius = horizontalRadius;
+            return dx * dx + dz * dz <= radius * radius;
+        }
+
+        /** Whether an actual player-feet cell stays inside both the circle and its vertical floor. */
+        public boolean allowsFeet(int x, int y, int z) {
+            return y >= minimumFeetY && allowsColumn(x, z);
+        }
+
+        /** Convenience form for a feet position; null is never an admissible movement cell. */
+        public boolean allowsFeet(BlockPos position) {
+            return position != null && allowsFeet(position.getX(), position.getY(), position.getZ());
+        }
     }
 
     public boolean revalidateRememberedTarget() {

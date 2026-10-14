@@ -724,8 +724,10 @@ public final class DangerWatcherLowHealthGameTests {
         combat.tick(bot);
         combat.tick(bot);
 
-        require(context, combat.describe().contains("phase=HEAL") && bot.isUsingItem(),
-                "breaking ranged LOS did not release the combat heal boundary: "
+        // CombatTask deliberately keeps food and drinkable potions out of live combat; after
+        // factual ranged pressure clears, HEAL is a safe waiting boundary, not an eating action.
+        require(context, combat.describe().contains("phase=HEAL") && !bot.isUsingItem(),
+                "breaking ranged LOS did not release the combat safe-heal boundary: "
                         + combat.describe());
         skeleton.discard();
         despawnAndComplete(context, bot);

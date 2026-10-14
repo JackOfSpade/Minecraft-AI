@@ -15,7 +15,7 @@ import java.util.Locale;
  * Real-server tests of the line-of-sight hunter (see {@code AggroController}): a real PvP BOT inhabitant on a real
  * HeroBot fake player, the wrapper loaded, a survival mock player as the "human". The scenes are stone platforms; every
  * time and distance below is a number of the rules: the continuous reaction time (0.5 s up close, 2 s at 64 blocks), the view cone,
- * hearing (vanilla vibrations), sight without a block limit and the 64 block engage limit, lost -> pursue -> search 10 s -> walk
+ * hearing (vanilla vibrations), sight without a block limit and the 16 block acquisition limit, lost -> pursue -> search 10 s -> walk
  * home, noticing again on the way home, an arrow from an unseen shooter (only its direction is known).
  * The bot faces east (+x) unless a test turns it.
  */
@@ -231,14 +231,14 @@ public final class AggroGameTests {
     // ------------------------------------------------------------------ (c) long sight
 
     /**
-     * (c) A player 40 blocks away in front with a clear line of sight is noticed (0.5 + 1.5 * 40 / 64 = 1.44 s, 29 ticks) and
-     * chased: sight has no block limit, the engage limit is 64.
+     * (c) A player 12 blocks away in front with a clear line of sight is noticed (0.5 + 1.5 * 12 / 64 = 0.78 s, 16 ticks) and
+     * chased. It is safely inside the 16-block acquisition limit; sight itself has no block limit.
      */
     @GameTest(environment = ENV + "aggro_long_sight", maxTicks = 600)
-    public void aggroAPlayerFortyBlocksAwayWithClearSightIsNoticedAndChased(GameTestHelper context) {
+    public void aggroAPlayerTwelveBlocksAwayWithClearSightIsNoticedAndChased(GameTestHelper context) {
         Rig rig = new Rig(context);
-        rig.buildStrip(46);
-        rig.createTarget(40.0);
+        rig.buildStrip(18);
+        rig.createTarget(12.0);
         boolean[] dressed = {false};
         long[] dressedAt = {0};
         long[] noticedAt = {-1};
@@ -256,11 +256,11 @@ public final class AggroGameTests {
                 if (rig.hasTarget()) {
                     noticedAt[0] = since;
                     Rig.LOG.info("[long-sight] noticed the player {} blocks away after {} ticks", fmt(startDist[0]), since);
-                    if (since < 26) {
-                        rig.fail("noticed a player 40 blocks away after only " + since + " ticks: the reaction time is 29 ticks");
+                    if (since < 13) {
+                        rig.fail("noticed a player 12 blocks away after only " + since + " ticks: the reaction time is about 16 ticks");
                     }
                 } else if (since > 100) {
-                    rig.fail("a player 40 blocks away in plain sight was never noticed; phase " + rig.phase() + " " + rig.trace());
+                    rig.fail("a player 12 blocks away in plain sight was never noticed; phase " + rig.phase() + " " + rig.trace());
                 }
                 return;
             }
@@ -286,16 +286,18 @@ public final class AggroGameTests {
         Rig rig = new Rig(context);
         rig.buildPlatform(HUNT_ARENA);
         sealedCell(rig, HUNT_DISTANCE, 8);
-        rig.createTarget(HUNT_DISTANCE);
+        rig.createTarget(ACQUIRE_DISTANCE);
         Hunt hunt = new Hunt(rig, context);
         context.onEachTick(() -> hunt.tick(false));
     }
 
     /**
-     * Where the hunt scenes happen: the player is noticed 20 blocks away, hides in a sealed cell there, and the search (which
-     * looks up to 12 blocks around the last known position) therefore always ends at least 8 blocks from where the bot
-     * started: the walk home is long enough to be interrupted.
+     * Where the hunt scenes happen: the player is acquired 14 blocks away (inside the 16-block acquisition cap), then stays
+     * visibly engaged at 20 blocks before hiding in a sealed cell there. The search looks up to 12 blocks around that last
+     * known position, so it always ends at least 8 blocks from where the bot started: the walk home is long enough to be
+     * interrupted. This also proves that an established, visible chase may continue beyond the acquisition cap.
      */
+    private static final int ACQUIRE_DISTANCE = 14;
     private static final int HUNT_DISTANCE = 20;
     private static final int HUNT_ARENA = 34;
 
@@ -308,7 +310,7 @@ public final class AggroGameTests {
         Rig rig = new Rig(context);
         rig.buildPlatform(HUNT_ARENA);
         sealedCell(rig, HUNT_DISTANCE, 8);
-        rig.createTarget(HUNT_DISTANCE);
+        rig.createTarget(ACQUIRE_DISTANCE);
         Hunt hunt = new Hunt(rig, context);
         context.onEachTick(() -> hunt.tick(true));
     }
@@ -322,6 +324,7 @@ public final class AggroGameTests {
         boolean[] dressedFlag = {false};
         int stage;
         long chaseSince = -1;
+        boolean advancedToHuntDistance;
         long hiddenAt = -1;
         double lkpX;
         double lkpZ;
@@ -394,12 +397,26 @@ public final class AggroGameTests {
                         if (chaseSince < 0) {
                             chaseSince = context.getTick();
                         }
-                        if (context.getTick() - chaseSince >= 3) {
+                        long chaseTicks = context.getTick() - chaseSince;
+                        if (!advancedToHuntDistance && chaseTicks >= 3) {
+                            // The controller only starts a hunt inside its 16-block acquisition cap. Once it has a live
+                            // sighting, it must keep chasing factually beyond that cap; moving the target now makes the
+                            // later search/return geometry long enough to exercise the interrupted return.
+                            rig.placeTargetAt(rig.homeX() + HUNT_DISTANCE, rig.bot.getY(), rig.homeZ());
+                            advancedToHuntDistance = true;
+                            Rig.LOG.info("[hunt] the engaged player stepped from {} to {} blocks at test tick {}", ACQUIRE_DISTANCE,
+                                    HUNT_DISTANCE, context.getTick());
+                            return;
+                        }
+                        if (advancedToHuntDistance && chaseTicks >= 8) {
                             lkpX = rig.target.getX();
                             lkpZ = rig.target.getZ();
                             hide();
                             stage = 1;
                         }
+                    } else if (advancedToHuntDistance) {
+                        rig.fail("the established chase ended after the visible player crossed the 16-block acquisition cap: phase "
+                                + phase + " " + rig.trace());
                     } else if (since > 100) {
                         rig.fail("the bot never noticed the player in plain view; phase " + phase + " " + rig.trace());
                     }

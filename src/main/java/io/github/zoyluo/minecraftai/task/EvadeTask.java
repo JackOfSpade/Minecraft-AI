@@ -12,6 +12,9 @@ import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
 import io.github.zoyluo.minecraftai.util.BlockPosText;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
@@ -274,17 +277,61 @@ public final class EvadeTask extends AbstractTask {
                                                 LivingEntity source,
                                                 BlockPos rememberedSource,
                                                 int distance) {
+        return admitBestSurfaceEscapePath(bot, source, rememberedSource, distance, goal -> true,
+                candidate -> bot.getActionPack().startSurfacePathTo(candidate));
+    }
+
+    /**
+     * Admits the first surface-only escape route whose requested and resolved endpoints both
+     * satisfy {@code endpointAllowed}.  A route may normalize its requested goal, so accepting
+     * the candidate alone would let a bounded caller inherit an endpoint it never approved.
+     */
+    static BlockPos admitBestSurfaceEscapePath(AIPlayerEntity bot,
+                                                LivingEntity source,
+                                                BlockPos rememberedSource,
+                                                int distance,
+                                                Predicate<BlockPos> endpointAllowed) {
+        return admitBestSurfaceEscapePath(bot, source, rememberedSource, distance, endpointAllowed,
+                candidate -> bot.getActionPack().startSurfacePathTo(candidate));
+    }
+
+    /**
+     * Admits a surface escape through a caller-supplied route starter. A bounded caller uses the
+     * same endpoint predicate and starter boundary, so a Baritone detour cannot escape through
+     * an otherwise valid in-bounds candidate.
+     */
+    static BlockPos admitBestSurfaceEscapePath(AIPlayerEntity bot,
+                                                LivingEntity source,
+                                                BlockPos rememberedSource,
+                                                int distance,
+                                                Predicate<BlockPos> endpointAllowed,
+                                                Function<BlockPos, ActionResult> startRoute) {
+        Objects.requireNonNull(endpointAllowed, "endpointAllowed");
+        Objects.requireNonNull(startRoute, "startRoute");
         int attempts = 0;
         for (BlockPos candidate : chooseGoals(bot, source, rememberedSource, distance)) {
-            ActionResult path = bot.getActionPack().startSurfacePathTo(candidate);
+            if (admittedEscapeEndpoint(candidate, null, endpointAllowed) == null) {
+                continue;
+            }
+            ActionResult path = startRoute.apply(candidate);
             attempts++;
             if (!path.isFailed()) {
+                BlockPos admitted = admittedEscapeEndpoint(
+                        candidate, bot.getActionPack().activePathGoal(), endpointAllowed);
+                if (admitted == null) {
+                    // The route accepted the requested candidate but normalized it outside the
+                    // caller's boundary.  It has not had a movement tick yet; release it before
+                    // considering another factual escape leg.
+                    bot.getActionPack().stopAll();
+                    continue;
+                }
                 // The flee gait belongs only to an admitted live escape path, and is requested after
-                // the route has started (starting a route ends the previous lease). A gait left behind after a failed admission would make
-                // ActionPack permanently busy and block the resume of paused work; the failure path below calls stopAll, which clears it.
-                requestFleeRoutePace(bot, source);
-                BlockPos resolved = bot.getActionPack().activePathGoal();
-                return resolved == null ? candidate : resolved.immutable();
+                // the route has started (starting a route ends the previous lease).  A route that
+                // settled while its endpoint was being checked needs no lease at all.
+                if (!bot.getActionPack().isPathExecutorIdle()) {
+                    requestFleeRoutePace(bot, source);
+                }
+                return admitted;
             }
             if (attempts >= MAX_PATH_ADMISSION_ATTEMPTS) {
                 break;
@@ -292,6 +339,22 @@ public final class EvadeTask extends AbstractTask {
         }
         bot.getActionPack().stopAll();
         return null;
+    }
+
+    /**
+     * Returns the endpoint a caller may retain only when both the requested candidate and the
+     * path executor's resolved endpoint satisfy the caller's boundary.
+     */
+    static BlockPos admittedEscapeEndpoint(BlockPos candidate,
+                                           BlockPos resolved,
+                                           Predicate<BlockPos> endpointAllowed) {
+        Objects.requireNonNull(candidate, "candidate");
+        Objects.requireNonNull(endpointAllowed, "endpointAllowed");
+        if (!endpointAllowed.test(candidate)) {
+            return null;
+        }
+        BlockPos endpoint = resolved == null ? candidate : resolved.immutable();
+        return endpointAllowed.test(endpoint) ? endpoint : null;
     }
 
     static List<BlockPos> chooseGoals(AIPlayerEntity bot,

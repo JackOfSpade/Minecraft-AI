@@ -26,6 +26,8 @@ import io.github.zoyluo.minecraftai.task.TaskManager;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.CommonLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -81,6 +83,13 @@ public class MinecraftAiMod implements ModInitializer {
         ChatCaptureListener.register();
         AIPayloads.register();
         MinecraftAiServerNetworking.INSTANCE.register();
+        ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((player, origin, destination) ->
+                AutoSprintController.INSTANCE.onWorldChange(player));
+        // A death can recreate the player's server entity in the same dimension. That is not a
+        // world-change event, but any autosprint entry still owns the old entity and must send
+        // its final stop packet through the replacement player.
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) ->
+                AutoSprintController.INSTANCE.onWorldChange(newPlayer));
 
         // The Baritone break policy caches a verdict per block from tag membership: drop it when the server starts and when tags
         // are loaded or reloaded (BreakVerdictCache names no Baritone type, so this stays free with the legacy engine).
@@ -128,7 +137,12 @@ public class MinecraftAiMod implements ModInitializer {
             io.github.zoyluo.minecraftai.task.AggroSense.clearAll();
         });
         ServerTickEvents.START_SERVER_TICK.register(server -> MiningAssistRuntime.beginTick());
-        ServerTickEvents.START_WORLD_TICK.register(AutoSprintController.INSTANCE::beforeWorldTick);
+        ServerTickEvents.START_WORLD_TICK.register(level -> {
+            // This runs before the level ticks its players, preserving an owner's real source
+            // portal for a safe companion handoff even when the transfer completes this tick.
+            TaskManager.INSTANCE.observePortalDepartures(level);
+            AutoSprintController.INSTANCE.beforeWorldTick(level);
+        });
         ServerTickEvents.END_WORLD_TICK.register(AutoSprintController.INSTANCE::afterWorldTick);
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             TpsGuard.INSTANCE.tick(server);

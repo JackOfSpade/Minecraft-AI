@@ -56,6 +56,33 @@ class FarmSurvivalBoundaryTest {
         assertTrue(prospector.contains("ObservableWorldQuery.canObserveFarmCell(bot, pos)"));
     }
 
+    @Test
+    void farmTaskApproachesUntilTheNextTillingOrPlantingClickIsPhysicallyAdmissible() throws IOException {
+        String farmTask = read("task/FarmTask.java");
+        int goToTarget = farmTask.indexOf("private void goToTarget(AIPlayerEntity bot)");
+        int till = farmTask.indexOf("private void till(AIPlayerEntity bot)", goToTarget);
+        assertTrue(goToTarget >= 0 && till > goToTarget, "farm target approach must remain locally auditable");
+        String approach = farmTask.substring(goToTarget, till);
+        assertTrue(approach.contains("FarmAction.canUseTopFace(bot, focus)"),
+                "tilling and planting must use the exact top-face admission shared with the real item click");
+        assertTrue(approach.contains("ObservableWorldQuery.canObserveFarmCellStrict(bot, focus)"),
+                "harvesting must retain its strict crop-outline observation fence");
+        assertFalse(approach.contains("distanceTo(focus.getCenter()) <= 4.5D"),
+                "a centre-distance approximation can admit a target whose support face cannot be clicked");
+
+        String farmAction = read("action/FarmAction.java");
+        assertTrue(farmAction.contains("BuildAction.canUseItemOnFace(bot, ground, Direction.UP)"),
+                "farm approach admission must share BuildAction's exact top-face geometry");
+        String build = read("action/BuildAction.java");
+        assertTrue(build.contains("public static boolean canUseItemOnFace")
+                        && build.contains("probeSupportFaceHit(player, pos, face, sampleRange)"),
+                "the approach probe must share the real face-click sampler without turning the bot");
+
+        int farmland = farmTask.indexOf("current = new FarmTarget(current.ground(), TargetAction.PLANT);");
+        assertTrue(farmland > till && farmTask.indexOf("phase = Phase.GOTO;", farmland) > farmland,
+                "a completed till must re-approach the newly lower farmland before planting");
+    }
+
     private static String read(String relative) throws IOException {
         return Files.readString(MAIN.resolve(relative));
     }

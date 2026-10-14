@@ -110,11 +110,12 @@ class BaritoneRobustnessContractTest {
         int lease = start.indexOf("NavSafetyNet.INSTANCE.renewBaritoneWater(bot)");
         int accepted = start.indexOf("accepted = true;");
         assertTrue(admission > 0 && lease > admission && accepted > lease, "the lease follows a successful admission");
-        assertTrue(start.contains("} finally {\n            if (!accepted) {\n                abandonStart(bot, previousPolicy);"),
+        assertTrue(start.contains("} finally {\n            if (!accepted) {\n                abandonStart(bot, predecessor, previousNavigationLimits, replacementPreempted, goalHandedOff);"),
                 "a refusal or an exception releases the water bookkeeping, the swim permission and the lease");
         String abandon = method(navigator, "private static void abandonStart(");
         assertTrue(abandon.contains("releaseRoute(bot.getUUID())") && abandon.contains("clearBaritoneWater(bot)")
-                && abandon.contains("setWaterAllowed(bot, false)") && abandon.contains("setPolicy(bot, previousPolicy)"),
+                && abandon.contains("setWaterAllowed(bot, predecessor.waterAllowed())")
+                && abandon.contains("setPolicy(bot, predecessor.policy())"),
                 "a refused start also puts back the previous break/place permission");
         assertTrue(start.contains("registry.isBusy(bot) ? registry.policy(bot) : BaritonePolicy.WALK_ONLY"),
                 "the permission to restore is the running route's, or walk-only when nothing runs");

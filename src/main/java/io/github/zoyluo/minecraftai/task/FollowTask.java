@@ -138,6 +138,8 @@ public final class FollowTask extends AbstractTask {
     private Gait paceGait = Gait.WALK;
     private long paceSince;
     private ServerPlayer lastTarget;
+    /** Game tick on which this task actually reached the land-only escort ticker. */
+    private long lastLandEscortTick = Long.MIN_VALUE;
 
     /** The player this task resolved on its last tick (empty before the first tick, or while the player is offline). */
     public Optional<ServerPlayer> currentTarget() {
@@ -147,6 +149,15 @@ public final class FollowTask extends AbstractTask {
     /** True while the escort sees a hostile within a few blocks: the task then ticks even under a degraded TPS. */
     boolean escortEngaged() {
         return escort.engaged();
+    }
+
+    /**
+     * True only on the tick where this task reached {@link FollowEscort#tick}. A predicted land
+     * state is insufficient: portal handoff, shelter-exit debt, boat, swim, wet-exit and target
+     * resolution branches all return before the ticker and must leave combat to DangerWatcher.
+     */
+    boolean ranLandEscortThisTick(AIPlayerEntity bot) {
+        return bot != null && lastLandEscortTick == bot.level().getGameTime();
     }
 
     /** Package-visible for GameTests: swings the escort has landed. */
@@ -264,14 +275,13 @@ public final class FollowTask extends AbstractTask {
         paceGait = Gait.WALK;
         paceSince = bot.level().getGameTime() - FollowPace.DWELL_TICKS;
         lastTarget = null;
+        lastLandEscortTick = Long.MIN_VALUE;
     }
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
         ServerPlayer target = target(bot).orElse(null);
-        if (target != null && target.level() == bot.level()) {
-            rememberPortalDeparture(target, bot.level());
-        }
+        observePortalDeparture(bot, target);
         if (target != null && target.level() != bot.level() && followOwnerThroughPortal(bot, target)) {
             return;
         }
@@ -388,6 +398,7 @@ public final class FollowTask extends AbstractTask {
         followLand(bot, target);
         // After the movement decisions of this tick: a swing never stops or redirects the follow.
         float yawBeforeEscort = bot.getYRot();
+        lastLandEscortTick = bot.level().getGameTime();
         escort.tick(bot, target);
         if (!bot.getActionPack().hasBaritoneRoute()) {
             // Combat aim runs after this bot has already written the next local input. Re-express that same world-space movement
@@ -774,6 +785,9 @@ public final class FollowTask extends AbstractTask {
     /** A bot's own owner gets a loaded-chunk direct route; every other selected player stays inside the ordinary observation boundary. */
     private LandRouteAttempt startLandRoute(AIPlayerEntity bot, ServerPlayer target, BlockPos targetPos, boolean refresh) {
         ActionPack pack = bot.getActionPack();
+        // A self-support refusal may only be borrowed from this specific route attempt. Mark
+        // before Baritone gets a chance to synchronously reject its first break.
+        selfSupportRecovery.markRouteStarted(bot);
         if (isVerifiedOwner(bot, target)) {
             ActionResult ownerRoute = pack.startOwnerFollowTo(target.getUUID(), targetPos, baritoneRadius, refresh);
             if (!ownerRoute.isFailed()) {
@@ -802,6 +816,23 @@ public final class FollowTask extends AbstractTask {
 
     private static boolean isVerifiedOwner(AIPlayerEntity bot, ServerPlayer target) {
         return target != null && AIPlayerManager.INSTANCE.ownerOf(bot).filter(target.getUUID()::equals).isPresent();
+    }
+
+    /**
+     * Captures a verified owner's real portal before that player ticks into another dimension.
+     * {@code START_WORLD_TICK} invokes this hook as well as the normal task tick; the latter keeps
+     * the same proof for ordinary, slower portal entries. Named non-owner follows never create a
+     * cross-dimension handoff authority.
+     */
+    void observePortalDeparture(AIPlayerEntity bot) {
+        observePortalDeparture(bot, target(bot).orElse(null));
+    }
+
+    private void observePortalDeparture(AIPlayerEntity bot, ServerPlayer target) {
+        if (target == null || !isVerifiedOwner(bot, target) || target.level() != bot.level()) {
+            return;
+        }
+        rememberPortalDeparture(target, bot.level());
     }
 
     /**
@@ -1102,6 +1133,7 @@ public final class FollowTask extends AbstractTask {
         escort.disengage();
         waterExitForcedByLandRoute = false;
         portalDeparture = null;
+        lastLandEscortTick = Long.MIN_VALUE;
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         suspendLandRecovery(bot);
         swimming.cancelStep(bot);
@@ -1130,6 +1162,7 @@ public final class FollowTask extends AbstractTask {
         waterExitForcedByLandRoute = false;
         portalDeparture = null;
         lastTarget = null;
+        lastLandEscortTick = Long.MIN_VALUE;
         NavSafetyNet.INSTANCE.clearFollowSwim(bot);
         suspendLandRecovery(bot);
         swimming.cancelStep(bot);

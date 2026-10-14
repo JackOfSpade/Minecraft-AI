@@ -1,7 +1,10 @@
 package io.github.zoyluo.minecraftai.task;
 
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.entity.CompanionAllegiance;
+import io.github.zoyluo.minecraftai.gametest.MockPlayers;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
+import io.github.zoyluo.minecraftai.network.PlayerKind;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -10,6 +13,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
@@ -78,11 +82,11 @@ public final class BotFallAndKnockbackGameTests {
         return bot;
     }
 
-    private static void put(AIPlayerEntity bot, ServerLevel world, double x, double y, double z) {
-        bot.teleportTo(world, x, y, z, Set.of(), 0.0F, 0.0F, true);
-        bot.setDeltaMovement(Vec3.ZERO);
-        bot.fallDistance = 0.0D;
-        bot.setOnGround(true);
+    private static void put(ServerPlayer player, ServerLevel world, double x, double y, double z) {
+        player.teleportTo(world, x, y, z, Set.of(), 0.0F, 0.0F, true);
+        player.setDeltaMovement(Vec3.ZERO);
+        player.fallDistance = 0.0D;
+        player.setOnGround(true);
     }
 
     private static void fail(GameTestHelper context, String message) {
@@ -277,11 +281,16 @@ public final class BotFallAndKnockbackGameTests {
     private record Variant(String label, boolean zombieAttacker, boolean sprint, boolean resistant) {
     }
 
+    /** Velocity and confirmed health loss from one controlled hit. */
+    private record Hit(Vec3 velocity, float damage) {
+    }
+
     /**
      * Player melee against a bot must push it exactly as it pushes a vanilla mob in the same geometry (direction and size, also
-     * with a sprint hit's extra knockback and with knockback resistance), and so must a zombie's melee. Every variant
+     * with a sprint hit's extra knockback and with knockback resistance), and so must a zombie's melee. The player attacker is a
+     * foreign fake player rather than another Minecraft-AI companion: companions deliberately cannot hurt one another. Every variant
      * hits a control zombie and, twelve ticks later (the attacker's cooldown has recharged), the bot from the same relative
-     * position, and compares the velocities right after the hit.
+     * position, proves each hit actually damaged its victim, and compares the velocities right after the hit.
      */
     @GameTest(maxTicks = 700)
     public void meleeKnockbackOfABotMatchesAVanillaMob(GameTestHelper context) {
@@ -291,7 +300,11 @@ public final class BotFallAndKnockbackGameTests {
         double botZ = origin.getZ() + 0.5D;
         double controlX = botX + 6.0D;
         AIPlayerEntity target = spawn(context, "BotKbTarget", origin);
-        AIPlayerEntity player = spawn(context, "BotKbPlayer", origin.offset(-6, 0, 0));
+        ServerPlayer player = MockPlayers.survivalMock(context);
+        put(player, world, origin.getX() - 5.5D, origin.getY(), origin.getZ() + 0.5D);
+        if (!PlayerKind.isBot(player) || CompanionAllegiance.areAllies(player, target)) {
+            fail(context, "the knockback attacker is not the required foreign fake player");
+        }
         List<Variant> variants = List.of(
                 new Variant("player_plain", false, false, false),
                 new Variant("player_sprint_hit", false, true, false),
@@ -299,9 +312,14 @@ public final class BotFallAndKnockbackGameTests {
                 new Variant("zombie_melee", true, false, false),
                 new Variant("zombie_vs_knockback_resistance", true, false, true));
         List<String> report = new ArrayList<>();
-        Vec3[] controlVelocity = {Vec3.ZERO};
+        Hit[] controlHit = {new Hit(Vec3.ZERO, 0.0F)};
         int[] tick = {0};
         context.onEachTick(() -> {
+            // Mock players are not ticked by the harness. Advance both server-player phases so each twelve-tick
+            // gap really recharges the mock attacker's normal attack-strength ticker.
+            world.getChunkSource().move(player);
+            player.tick();
+            player.doTick();
             tick[0]++;
             int slot = tick[0] - LOADED_AFTER_TICKS;
             if (slot < 0 || slot % 12 != 0) {
@@ -310,7 +328,6 @@ public final class BotFallAndKnockbackGameTests {
             int index = slot / 24;
             if (index >= variants.size()) {
                 AIPlayerManager.INSTANCE.despawn(world.getServer(), target.getGameProfile().name());
-                AIPlayerManager.INSTANCE.despawn(world.getServer(), player.getGameProfile().name());
                 context.succeed();
                 return;
             }
@@ -319,18 +336,25 @@ public final class BotFallAndKnockbackGameTests {
             if (!botSlot) {
                 Zombie victim = zombie(world, controlX, origin.getY(), botZ);
                 setResistance(victim, v);
-                controlVelocity[0] = hit(world, v, player, victim);
+                controlHit[0] = hit(world, v, player, victim);
                 victim.discard();
                 return;
             }
             setResistance(target, v);
             put(target, world, botX, origin.getY(), botZ);
-            Vec3 botVelocity = hit(world, v, player, target);
-            Vec3 mobVelocity = controlVelocity[0];
+            Hit botHit = hit(world, v, player, target);
+            Vec3 botVelocity = botHit.velocity();
+            Vec3 mobVelocity = controlHit[0].velocity();
             String line = String.format("BOTKB|%s|bot=(%.4f,%.4f,%.4f)|vanillaMob=(%.4f,%.4f,%.4f)", v.label(),
                     botVelocity.x, botVelocity.y, botVelocity.z, mobVelocity.x, mobVelocity.y, mobVelocity.z);
             System.out.println(line);
             report.add(line);
+            if (controlHit[0].damage() <= 0.0F) {
+                fail(context, "the control mob was not damaged, so the comparison is invalid: " + line);
+            }
+            if (botHit.damage() <= 0.0F) {
+                fail(context, v.label() + ": the foreign player did not damage the bot before knockback comparison\n" + report);
+            }
             // the attacker stands 1.5 blocks south of the victim: the push is away from it (+z) and up
             if (mobVelocity.horizontalDistance() < 0.2D || mobVelocity.y < 0.2D || mobVelocity.z <= 0.0D) {
                 fail(context, "the control mob was not knocked back as expected, the test is broken: " + line);
@@ -427,9 +451,10 @@ public final class BotFallAndKnockbackGameTests {
     }
 
     /** One hit of the variant's attacker on {@code victim} from 1.5 blocks south of it (facing +z); returns the victim's velocity right after. */
-    private static Vec3 hit(ServerLevel world, Variant v, AIPlayerEntity player, LivingEntity victim) {
+    private static Hit hit(ServerLevel world, Variant v, ServerPlayer player, LivingEntity victim) {
         victim.invulnerableTime = 0;
         victim.setHealth(victim.getMaxHealth());
+        float healthBefore = victim.getHealth();
         if (v.zombieAttacker()) {
             Zombie attacker = zombie(world, victim.getX(), victim.getY(), victim.getZ() - 1.5D);
             attacker.doHurtTarget(world, victim);
@@ -439,6 +464,6 @@ public final class BotFallAndKnockbackGameTests {
             player.setSprinting(v.sprint());
             player.attack(victim);
         }
-        return victim.getDeltaMovement();
+        return new Hit(victim.getDeltaMovement(), healthBefore - victim.getHealth());
     }
 }

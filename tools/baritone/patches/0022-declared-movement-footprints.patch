@@ -1,0 +1,212 @@
+Expose immutable declared action and body footprints from Baritone movements so a host can
+validate its physical route boundary before a candidate is admitted or an executor writes input.
+The final per-click callback remains responsible for dynamic ray hits and observed-cell safety.
+
+diff --git a/src/api/java/baritone/api/pathing/movement/IMovement.java b/src/api/java/baritone/api/pathing/movement/IMovement.java
+--- a/src/api/java/baritone/api/pathing/movement/IMovement.java
++++ b/src/api/java/baritone/api/pathing/movement/IMovement.java
+@@ -18,5 +18,6 @@ package baritone.api.pathing.movement;
+ 
+ import baritone.api.utils.BetterBlockPos;
++import java.util.List;
+ import net.minecraft.core.BlockPos;
+ 
+ /**
+@@ -51,5 +52,23 @@ public interface IMovement {
+ 
+     BetterBlockPos getDest();
+ 
++    /**
++     * Immutable cells this movement may break or use as a placement destination. Hosts may
++     * inspect this pure metadata during admission; dynamic ray targets still require the final
++     * execution-time permission check. The default declares no additional static action cells.
++     */
++    default List<BetterBlockPos> getDeclaredActionCells() {
++        return List.of();
++    }
++
++    /**
++     * Immutable feet cells this movement may intentionally occupy while it runs. This includes
++     * intermediate and documented recovery/overshoot positions, not terrain support or head
++     * reads. The default declares no additional cells; hosts still validate source/destination.
++     */
++    default List<BetterBlockPos> getDeclaredMovementCells() {
++        return List.of();
++    }
++
+     BlockPos getDirection();
+ }
+diff --git a/src/main/java/baritone/pathing/movement/Movement.java b/src/main/java/baritone/pathing/movement/Movement.java
+--- a/src/main/java/baritone/pathing/movement/Movement.java
++++ b/src/main/java/baritone/pathing/movement/Movement.java
+@@ -54,6 +54,9 @@ public abstract class Movement implements IMovement, MovementHelper {
+      */
+     protected final BetterBlockPos positionToPlace;
+ 
++    private final List<BetterBlockPos> declaredActionCells;
++    private List<BetterBlockPos> declaredMovementCells;
++
+     private Double cost;
+ 
+     public List<BlockPos> toBreakCached = null;
+@@ -71,6 +74,7 @@ public abstract class Movement implements IMovement, MovementHelper {
+         this.dest = dest;
+         this.positionsToBreak = toBreak;
+         this.positionToPlace = toPlace;
++        this.declaredActionCells = copyDeclaredActionCells(toBreak, toPlace);
+     }
+ 
+     protected Movement(IBaritone baritone, BetterBlockPos src, BetterBlockPos dest, BetterBlockPos[] toBreak) {
+@@ -211,17 +215,49 @@ public abstract class Movement implements IMovement, MovementHelper {
+         return dest;
+     }
+ 
++    @Override
++    public List<BetterBlockPos> getDeclaredActionCells() {
++        return declaredActionCells;
++    }
++
++    @Override
++    public List<BetterBlockPos> getDeclaredMovementCells() {
++        if (declaredMovementCells == null) {
++            Set<BetterBlockPos> cells = new LinkedHashSet<>(getValidPositions());
++            addDeclaredMovementCells(cells);
++            declaredMovementCells = List.copyOf(cells);
++        }
++        return declaredMovementCells;
++    }
++
++    /**
++     * Lets a movement declare exceptional feet cells in addition to its ordinary valid
++     * positions. Implementations use this for intentional recovery and overshoot behavior;
++     * callers receive the immutable snapshot from {@link #getDeclaredMovementCells()}.
++     */
++    protected void addDeclaredMovementCells(Set<BetterBlockPos> cells) {
++    }
++
++    private static List<BetterBlockPos> copyDeclaredActionCells(BetterBlockPos[] toBreak, BetterBlockPos toPlace) {
++        List<BetterBlockPos> cells = new ArrayList<>(toBreak.length + (toPlace == null ? 0 : 1));
++        Collections.addAll(cells, toBreak);
++        if (toPlace != null) {
++            cells.add(toPlace);
++        }
++        return List.copyOf(cells);
++    }
++
+     /**
+      * Preflights this movement's declared world-action cells before it may update or issue input. Dynamic ray hits
+      * still go through the final helper callback immediately before the controller call.
+      */
+     public boolean navigationActionCellsAllowed() {
+-        for (BetterBlockPos pos : positionsToBreak) {
++        for (BetterBlockPos pos : declaredActionCells) {
+             if (!ctx.allowNavigationActionCell(pos)) {
+                 return false;
+             }
+         }
+-        return positionToPlace == null || ctx.allowNavigationActionCell(positionToPlace);
++        return true;
+     }
+ 
+     @Override
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementAscend.java b/src/main/java/baritone/pathing/movement/movements/MovementAscend.java
+--- a/src/main/java/baritone/pathing/movement/movements/MovementAscend.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementAscend.java
+@@ -64,6 +64,12 @@ public class MovementAscend extends Movement {
+         );
+     }
+ 
++    @Override
++    protected void addDeclaredMovementCells(Set<BetterBlockPos> cells) {
++        // updateState accepts this forward step as a completed sprint/ascend.
++        cells.add(new BetterBlockPos(dest.offset(getDirection().below())));
++    }
++
+     public static double cost(CalculationContext context, int x, int y, int z, int destX, int destZ) {
+         BlockState toPlace = context.get(destX, y, destZ);
+         double additionalPlacementCost = 0;
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementDescend.java b/src/main/java/baritone/pathing/movement/movements/MovementDescend.java
+--- a/src/main/java/baritone/pathing/movement/movements/MovementDescend.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementDescend.java
+@@ -76,6 +76,12 @@ public class MovementDescend extends Movement {
+         return ImmutableSet.of(src, dest.above(), dest);
+     }
+ 
++    @Override
++    protected void addDeclaredMovementCells(Set<BetterBlockPos> cells) {
++        // updateState deliberately aims through this cell to carry a descent over its ledge.
++        cells.add(new BetterBlockPos(dest.getX() * 2 - src.getX(), dest.getY(), dest.getZ() * 2 - src.getZ()));
++    }
++
+     public static void cost(CalculationContext context, int x, int y, int z, int destX, int destZ, MutableMoveResult res) {
+         double totalCost = 0;
+         BlockState destDown = context.get(destX, y - 1, destZ);
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementParkour.java b/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
+--- a/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementParkour.java
+@@ -255,6 +255,19 @@ public class MovementParkour extends Movement {
+         return set;
+     }
+ 
++    @Override
++    protected void addDeclaredMovementCells(Set<BetterBlockPos> cells) {
++        // Recovery can briefly step one block behind the launch point, while sprint momentum can
++        // carry a landing one block past dest before the movement corrects it. Include the same
++        // two feet heights as the ordinary jump span.
++        BetterBlockPos beforeSource = new BetterBlockPos(src.relative(direction, -1));
++        BetterBlockPos pastDestination = new BetterBlockPos(dest.relative(direction));
++        for (int y = 0; y < 2; y++) {
++            cells.add(beforeSource.above(y));
++            cells.add(pastDestination.above(y));
++        }
++    }
++
+     @Override
+     public boolean safeToCancel(MovementState state) {
+         // once this movement is instantiated, the state is default to PREPPING
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java b/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java
+--- a/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java
+@@ -74,6 +74,14 @@ public class MovementTraverse extends Movement {
+         return ImmutableSet.of(src, dest); // src.above means that we don't get caught in an infinite loop in water
+     }
+ 
++    @Override
++    protected void addDeclaredMovementCells(Set<BetterBlockPos> cells) {
++        // overshootTraverse recognizes up to two cells beyond dest as a successful traverse.
++        BetterBlockPos firstOvershoot = new BetterBlockPos(dest.offset(getDirection()));
++        cells.add(firstOvershoot);
++        cells.add(new BetterBlockPos(firstOvershoot.offset(getDirection())));
++    }
++
+     public static double cost(CalculationContext context, int x, int y, int z, int destX, int destZ) {
+         BlockState pb0 = context.get(destX, y + 1, destZ);
+         BlockState pb1 = context.get(destX, y, destZ);
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java b/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java
+--- a/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementDiagonal.java
+@@ -108,7 +108,24 @@ public class MovementDiagonal extends Movement {
+         return ImmutableSet.of(src, dest, diagA, diagB);
+     }
+ 
++    /**
++     * Both orthogonal corners are valid feet positions while a diagonal settles. Refuse the
++     * move during search when either corner is outside the host's immutable cell authority, so
++     * a bounded route can choose a factual cardinal leg instead of being rejected after it has
++     * already won the A* race.
++     */
++    private static boolean navigationDiagonalFootprintAllowed(CalculationContext context,
++                                                               int x, int y, int z, int destX, int destZ) {
++        return context.bsi.isNavigationCellAllowed(x, y, z)
++                && context.bsi.isNavigationCellAllowed(x, y, destZ)
++                && context.bsi.isNavigationCellAllowed(destX, y, z)
++                && context.bsi.isNavigationCellAllowed(destX, y, destZ);
++    }
++
+     public static void cost(CalculationContext context, int x, int y, int z, int destX, int destZ, MutableMoveResult res) {
++        if (!navigationDiagonalFootprintAllowed(context, x, y, z, destX, destZ)) {
++            return;
++        }
+         if (!MovementHelper.canWalkThrough(context, destX, y + 1, destZ)) {
+             return;
+         }

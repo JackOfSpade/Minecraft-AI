@@ -52,6 +52,12 @@ jobs:
           ./gradlew --no-daemon --console=plain --stacktrace
           compileJava compileClientJava compileTestJava compileGametestJava
 
+      - name: Compile PvP BOT wrapper source sets for CodeQL extraction
+        working-directory: Minecraft-Spawn-Bots-Wrapper
+        run: >-
+          ./gradlew --no-daemon --console=plain --stacktrace
+          compileJava compileTestJava compileGametestJava
+
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:

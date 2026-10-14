@@ -61,6 +61,10 @@ public final class FollowSwimGameTests {
     private static final int POND_Z1 = 14;
     static final int LANE_Z = 8;
     private static final double SWIM_Y = -1.0D + 0.125D;
+    /** Vanilla's water-current push magnitude ({@code Entity.updateInWaterStateAndDoWaterCurrentPushing}). */
+    private static final double NATIVE_WATER_CURRENT_PUSH = 0.014D;
+    /** Half a block sideways is enough to cross out of the admitted centre lane, but still a normal one-cell current drift. */
+    private static final double MATERIAL_CURRENT_DRIFT = 0.50D;
 
     /**
      * A routine pond crossing stays under Follow's control except for an exact guarded recovery
@@ -154,16 +158,25 @@ public final class FollowSwimGameTests {
         double[] targetX = {9.5D};
         boolean[] sawWater = {false};
         boolean[] sawCurrent = {false};
+        boolean[] sawMaterialCurrentDrift = {false};
+        double[] firstWetZ = {Double.NaN};
         AtomicInteger tick = new AtomicInteger();
         context.failIfEver(() -> {
             int now = tick.incrementAndGet();
             requireRunning(context, follow, bot);
             sawWater[0] |= bot.isInWater();
             if (bot.isInWater()) {
-                // Deterministic analogue of an opposing river current: it is a physical velocity
-                // only in the test fixture, never a production movement shortcut.
+                // Deterministic analogue of a real flowing-water current. Its magnitude is
+                // vanilla's own water-current push, never a production movement shortcut. Use
+                // the cross-lane axis: a real swimmer can continue upstream while a current
+                // carries their body into the adjacent observed water cell.
+                if (Double.isNaN(firstWetZ[0])) {
+                    firstWetZ[0] = bot.getZ();
+                } else if (bot.getZ() <= firstWetZ[0] - MATERIAL_CURRENT_DRIFT) {
+                    sawMaterialCurrentDrift[0] = true;
+                }
                 Vec3 velocity = bot.getDeltaMovement();
-                bot.setDeltaMovement(velocity.x - 0.045D, velocity.y, velocity.z);
+                bot.setDeltaMovement(velocity.x, velocity.y, velocity.z - NATIVE_WATER_CURRENT_PUSH);
                 sawCurrent[0] = true;
             }
             require(context, bot.getAirSupply() > FollowOxygen.RESCUE_AIR,
@@ -183,8 +196,8 @@ public final class FollowSwimGameTests {
 
             if (targetX[0] >= 24.0D && now > 180 && !bot.isInWater()
                     && bot.getX() >= pond.feet().getX() + 23.5D && bot.distanceTo(target) <= 5.0D) {
-                require(context, sawWater[0] && sawCurrent[0],
-                        "the fixture did not make the follower swim against the current");
+                require(context, sawWater[0] && sawCurrent[0] && sawMaterialCurrentDrift[0],
+                        "the fixture did not materially displace the follower into adjacent observed water");
                 finish(context, pond, bot, target);
             }
         });

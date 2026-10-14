@@ -425,6 +425,20 @@ public final class BuildAction {
     }
 
     /**
+     * Pure admission for an eventual {@link #useItemOnFace} call.  It uses the same inset face
+     * samples, physical interaction range and obstruction ray as the real click, but does not
+     * turn the bot's head, consume an item or mutate the world.  Tasks use this while choosing a
+     * standing position so an AABB-range check cannot prematurely admit a diagonal top-face click
+     * that the actual item use would refuse.
+     */
+    public static boolean canUseItemOnFace(AIPlayerEntity player, BlockPos pos, Direction face) {
+        double sampleRange = exactPlacementSampleRange(
+                MinecraftAiConfig.get().perception().radius(), player.blockInteractionRange());
+        return probeSupportFaceHit(player, pos, face, sampleRange) != null
+                && player.isWithinBlockInteractionRange(pos, 0.0D);
+    }
+
+    /**
      * Whether {@link #placeBlockAt} would find an acceptable support at {@code pos} -- the SAME
      * reach and obstruction test placeBlockAt itself uses ({@link #probeSupportFaceHit} +
      * {@code isWithinBlockInteractionRange}), without any world mutation, requiring an item in hand, or

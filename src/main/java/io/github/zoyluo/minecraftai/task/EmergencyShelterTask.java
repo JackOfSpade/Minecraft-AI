@@ -1107,7 +1107,6 @@ public final class EmergencyShelterTask extends AbstractTask {
         if (tickHoldEating(bot)) {
             return;
         }
-        announceMissingRecoverySuppliesIfNeeded(bot);
         if (surfaceShelter) {
             if (!bot.level().isBrightOutside()) {
                 consecutiveDaylightTicks = 0;
@@ -1187,16 +1186,21 @@ public final class EmergencyShelterTask extends AbstractTask {
                     "healing_potion", hasHealingPotion);
             return false; // let the ordinary recovery primitive use it later this same tick
         }
-        if (!isHealingStalledWithoutRecoverySupply(bot.getHealth(), bot.getMaxHealth(), hasFoodAvailable,
-                hasHealingPotion,
-                canRegenerateNaturally(bot))) {
+        boolean canRegenerate = canRegenerateNaturally(bot);
+        boolean healingStalled = isHealingStalledWithoutRecoverySupply(
+                bot.getHealth(), bot.getMaxHealth(), hasFoodAvailable, hasHealingPotion,
+                canRegenerate);
+        if (!healingStalled) {
             return false;
         }
-        announceMissingRecoverySuppliesIfNeeded(bot);
-        if (shouldAbandonRescueWaitAndFight(bot.getHealth(), bot.getMaxHealth())) {
+        if (!shouldRequestRecoverySupplies(bot.getHealth(), bot.getMaxHealth(),
+                hasFoodAvailable, hasHealingPotion, canRegenerate)) {
             beginOutOfFoodExit(bot);
             return true;
         }
+        // Only a genuinely stalled, below-half recovery needs player intervention. In particular,
+        // a bot that ate its final item to food 18+ keeps regenerating and must not cry for help.
+        announceMissingRecoverySuppliesIfNeeded(bot);
         waitingForRescue = true;
         return true;
     }
@@ -1341,6 +1345,22 @@ public final class EmergencyShelterTask extends AbstractTask {
                                                           boolean canRegenerate) {
         return !hasHealingPotion && isHealingStalledWithoutFood(
                 health, maxHealth, hasFoodAvailable, canRegenerate);
+    }
+
+    /**
+     * A rescue request is for a wounded bot that is both genuinely unable to keep regenerating
+     * and too weak to leave its sealed shelter. A full hunger bar with no remaining inventory
+     * food is still a viable natural-recovery path; at half health or above, leaving to fight is
+     * safer and should not emit a misleading rescue cry first.
+     */
+    static boolean shouldRequestRecoverySupplies(float health,
+                                                  float maxHealth,
+                                                  boolean hasFoodAvailable,
+                                                  boolean hasHealingPotion,
+                                                  boolean canRegenerate) {
+        return isHealingStalledWithoutRecoverySupply(
+                health, maxHealth, hasFoodAvailable, hasHealingPotion, canRegenerate)
+                && !shouldAbandonRescueWaitAndFight(health, maxHealth);
     }
 
     /** Vanilla natural regeneration needs a hunger bar of at least 18 (and the gamerule on). */

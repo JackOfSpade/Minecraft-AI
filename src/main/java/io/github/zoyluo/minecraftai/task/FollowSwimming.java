@@ -95,6 +95,25 @@ final class FollowSwimming {
                                                  int observationRadius) {
     }
 
+    /** Outcome of a complete local dry-step proof. */
+    private enum ObservedDryStepResult {
+        /** A legal dry {@link WalkedStep} now owns the movement. */
+        STARTED,
+        /** A budget or guarded-step fence delayed a complete admission, so it must be re-proved before handoff. */
+        PENDING,
+        /** The complete observed envelope contains no dry landing. */
+        NONE,
+        /** Dry cells existed, but every final walked-step admission was conclusively refused. */
+        REJECTED
+    }
+
+    /** Distinguishes a retryable admission handoff from a physical refusal without leaking it to generic callers. */
+    private enum StepAdmissionResult {
+        STARTED,
+        PENDING,
+        REFUSED
+    }
+
     /**
      * Per-server-tick accounting for strict water planning.  A planner may reserve at most one
      * lateral BFS slice per tick; an UNKNOWN result then spends only the remaining capacity on its
@@ -966,9 +985,52 @@ final class FollowSwimming {
         if (stepHoldsTheTick(bot, world, elapsed)) {
             return true;
         }
-        if (!forceWetExit && !needsWaterExit(bot, target, standoff)) {
-            // Dry, or wading through shallows that land follow can handle itself (its pathfinder, stop
-            // distance and stuck recovery): nothing here may run a water search for it.
+        // A shallow-water bot outside its arrival radius may have a visible dry landing already,
+        // but land follow cannot begin a dry route from the wet start cell.  Take that one
+        // independently observed egress before handing control to land follow.  This does not
+        // change the close-range wading hold: at standoff, ordinary land follow still owns it.
+        boolean wadingOutsideArrival = !forceWetExit
+                && !isSwimming(bot)
+                && isSwimCell(world, bot.blockPosition())
+                && bot.distanceTo(target) > standoff + WADE_ARRIVAL_SLACK;
+        boolean rejectedWadingEgress = false;
+        boolean noImmediateWadingEgress = false;
+        if (wadingOutsideArrival) {
+            if (mustYieldToWaterRescue(bot)) {
+                yieldMovementToWaterRescue(bot);
+                clearRoute();
+                waiting = true;
+                return true;
+            }
+            ObservedDryStepResult egress = beginObservedWadingEgressStep(bot, target.blockPosition());
+            if (egress != ObservedDryStepResult.NONE) {
+                if (egress != ObservedDryStepResult.REJECTED) {
+                    NavSafetyNet.INSTANCE.renewFollowSwim(bot);
+                    clearRoute();
+                    ascending = false;
+                    waiting = egress != ObservedDryStepResult.STARTED;
+                    return true;
+                }
+                // A dry cell alone is not a legal dry route start: a diagonal/refusal-envelope
+                // failure must use the existing wet EXIT route, rather than retrying the same
+                // impossible local landing or handing Baritone its wet origin.
+                rejectedWadingEgress = true;
+            } else {
+                // The egress probe covers exactly the dry one-step envelope that ordinary land
+                // routing can start from. Repeating the wider wet-start check would spend another
+                // strict observation slice before the exit planner gets a chance to move the bot.
+                noImmediateWadingEgress = true;
+            }
+        }
+        // Until a dry route-start has actually been admitted, a distant wader cannot safely fall
+        // through to land follow. Keep the water owner across an exhausted/cooling exit search,
+        // just as a final physical refusal does.
+        boolean keepWetOwnership = forceWetExit || rejectedWadingEgress || noImmediateWadingEgress;
+        boolean needsWetExit = keepWetOwnership || needsWaterExit(bot, target, standoff);
+        if (!needsWetExit) {
+            // Dry, an in-range wader, or a shallow without a locally proved dry egress: land
+            // follow owns the ordinary pathfinder, stop distance, and stuck recovery. Nothing
+            // here may run a water search for that case.
             clearRoute();
             ascending = false;
             return false;
@@ -1002,8 +1064,8 @@ final class FollowSwimming {
                 // A just-refused land route established that Baritone cannot take over this wet
                 // starting cell.  Keep the explicit water-exit owner until its bounded retry,
                 // rather than bouncing back into the same costly Baritone refusal every tick.
-                waiting = forceWetExit;
-                return forceWetExit;
+                waiting = keepWetOwnership;
+                return keepWetOwnership;
             }
             if (!exitQuery.equals(exitFailureQuery)) {
                 exitFailedUntilTick = 0;
@@ -1025,8 +1087,8 @@ final class FollowSwimming {
             if (route == null) {
                 exitFailedUntilTick = elapsed + 40;
                 exitFailureQuery = exitQuery;
-                waiting = forceWetExit;
-                return forceWetExit;
+                waiting = keepWetOwnership;
+                return keepWetOwnership;
             }
         }
         exitFailedUntilTick = 0;
@@ -1129,6 +1191,41 @@ final class FollowSwimming {
      * ordinary edge scan from the new physical position.
      */
     private boolean beginObservedLandApproachStep(AIPlayerEntity bot, BlockPos goal) {
+        return beginObservedDryStep(bot, goal, true, "follow_swim_observed_land_approach")
+                == ObservedDryStepResult.STARTED;
+    }
+
+    /**
+     * A wader must leave a wet start cell before a dry route can be admitted.  Unlike an approach
+     * step, any nearby dry landing is useful: once dry, normal land follow can choose the actual
+     * route to the player.  A known-but-not-yet-admitted landing remains water-owned for this
+     * tick so a guarded predecessor is not replaced by a wet Baritone handoff. This deliberately
+     * matches ActionPack's one-step dry route-start envelope rather than the wider approach
+     * envelope: if no such landing exists, reserve the remaining strict work for the water exit
+     * route instead of repeatedly rescanning unreachable deep drops.
+     */
+    private ObservedDryStepResult beginObservedWadingEgressStep(AIPlayerEntity bot, BlockPos goal) {
+        return beginObservedDryStep(bot, goal, false, "follow_swim_wade_egress", true);
+    }
+
+    /**
+     * Classifies the complete local dry {@link WalkedStep} envelope before attempting its ranked
+     * admissions.  The shared strict-work reservation makes the chosen landing independent of a
+     * budget-dependent prefix; callers distinguish no dry landing from a temporary handoff wait.
+     */
+    private ObservedDryStepResult beginObservedDryStep(AIPlayerEntity bot, BlockPos goal,
+                                                        boolean requireCloser, String reason) {
+        return beginObservedDryStep(bot, goal, requireCloser, reason, false);
+    }
+
+    /**
+     * Classifies either the complete local approach envelope or the smaller dry start envelope
+     * used to hand a wader to land routing.  Both are fully classified before any physical
+     * admission, so the ranked choice cannot depend on a partial strict-work prefix.
+     */
+    private ObservedDryStepResult beginObservedDryStep(AIPlayerEntity bot, BlockPos goal,
+                                                        boolean requireCloser, String reason,
+                                                        boolean startEnvelopeOnly) {
         ServerLevel world = bot.level();
         BlockPos feet = bot.blockPosition();
         double before = feet.distSqr(goal);
@@ -1136,24 +1233,28 @@ final class FollowSwimming {
         // This is the complete local dry WalkedStep envelope: every horizontal/diagonal neighbour
         // at a level, one-up, or up-to-three-down landing, plus a vertical drop. beginStep and
         // WalkedStep.refusal retain the final vanilla-physical legality check.
-        for (int dy = -3; dy <= 1; dy++) {
+        int minDy = startEnvelopeOnly ? -1 : -3;
+        for (int dy = minDy; dy <= 1; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
-                    if (dx != 0 || dy != 0 || dz != 0) {
+                    // ActionPack can only start an uphill/downhill route on one horizontal
+                    // axis. Keep the wader probe identical to that concrete start envelope.
+                    if ((dx != 0 || dy != 0 || dz != 0)
+                            && (!startEnvelopeOnly || dy == 0 || Math.abs(dx) + Math.abs(dz) <= 1)) {
                         candidates.add(feet.offset(dx, dy, dz));
                     }
                 }
             }
         }
         List<BlockPos> ranked = candidates.stream()
-                .filter(candidate -> candidate.distSqr(goal) + 0.01D < before)
+                .filter(candidate -> !requireCloser || candidate.distSqr(goal) + 0.01D < before)
                 .sorted(Comparator.comparingDouble(candidate -> candidate.distSqr(goal)))
                 .toList();
         // The historic stream fully classified this ranked envelope before it attempted its
         // first step. Keep that decision independent of a partial strict budget: either reserve
         // observations plus all possible re-proved admissions, or yield for the next tick.
         if (!canAffordStrictWaterWork(false, ranked.size() * 2)) {
-            return false;
+            return ObservedDryStepResult.PENDING;
         }
         List<BlockPos> dry = new ArrayList<>(ranked.size());
         for (BlockPos candidate : ranked) {
@@ -1163,11 +1264,15 @@ final class FollowSwimming {
             }
         }
         for (BlockPos candidate : dry) {
-            if (beginStep(bot, candidate, "follow_swim_observed_land_approach")) {
-                return true;
+            StepAdmissionResult result = tryBeginStep(bot, candidate, reason, true);
+            if (result == StepAdmissionResult.STARTED) {
+                return ObservedDryStepResult.STARTED;
+            }
+            if (result == StepAdmissionResult.PENDING) {
+                return ObservedDryStepResult.PENDING;
             }
         }
-        return false;
+        return dry.isEmpty() ? ObservedDryStepResult.NONE : ObservedDryStepResult.REJECTED;
     }
 
     private Entry currentEntry(AIPlayerEntity bot, ServerPlayer target, int elapsed) {
@@ -1566,7 +1671,7 @@ final class FollowSwimming {
      * @return whether the step was started
      */
     private boolean beginStep(AIPlayerEntity bot, BlockPos cell, String reason) {
-        return beginStep(bot, cell, reason, true);
+        return tryBeginStep(bot, cell, reason, true) == StepAdmissionResult.STARTED;
     }
 
     /**
@@ -1575,28 +1680,37 @@ final class FollowSwimming {
      * its immediate re-observation/refusal proof and input attempt.
      */
     private boolean beginStep(AIPlayerEntity bot, BlockPos cell, String reason, boolean chargeStrictAdmission) {
+        return tryBeginStep(bot, cell, reason, chargeStrictAdmission) == StepAdmissionResult.STARTED;
+    }
+
+    /**
+     * Starts one physical admission while retaining whether a caller should wait for the shared
+     * strict-work/guarded-step handoff or discard this currently refused candidate.
+     */
+    private StepAdmissionResult tryBeginStep(AIPlayerEntity bot, BlockPos cell, String reason,
+                                             boolean chargeStrictAdmission) {
         boolean hiddenWorldScan = SwimRoute.hiddenWorldScanAllowed(bot);
         if (chargeStrictAdmission && !consumeStrictWaterWork(hiddenWorldScan)) {
-            return false;
+            return StepAdmissionResult.PENDING;
         }
         SwimRoute.Cell observed = SwimRoute.observedCell(bot, bot.level(), cell, hiddenWorldScan);
         if (observed == null) {
-            return false;
+            return StepAdmissionResult.REFUSED;
         }
         WalkedStep.Kind kind = observed == SwimRoute.Cell.DRY
                 ? dryStepKind(bot, cell)
                 : WalkedStep.Kind.SWIM;
         if (kind == null) {
-            return false;
+            return StepAdmissionResult.REFUSED;
         }
         // observedCell proved the landing (or water destination) itself. Before the vanilla
         // validator reads its diagonal corner, hop-headroom, or descent sweep cells, strict
         // survival must prove those finite physical cells too.
         if (!hiddenWorldScan && !SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, cell, kind)) {
-            return false;
+            return StepAdmissionResult.REFUSED;
         }
         if (WalkedStep.refusal(bot, cell, kind) != null) {
-            return false;
+            return StepAdmissionResult.REFUSED;
         }
         StepAdmission admission = new StepAdmission(hiddenWorldScan, isSwimCell(bot.level(), bot.blockPosition()),
                 bot.blockPosition().immutable(), cell.immutable());
@@ -1605,11 +1719,11 @@ final class FollowSwimming {
         if (lease == null) {
             // Another guarded physical step still owns ActionPack's fail-closed handoff fence.
             // Its owner will reconcile/release it before this route publishes a fresh movement.
-            return false;
+            return StepAdmissionResult.PENDING;
         }
         stepLease = lease;
         stepAdmission = admission;
-        return true;
+        return StepAdmissionResult.STARTED;
     }
 
     /**
@@ -1627,24 +1741,27 @@ final class FollowSwimming {
         // equally narrow water-only envelope as well. The latter is re-proved as observed water
         // below; a distant controller relocation can never retain this step's keys.
         BlockPos feet = bot.blockPosition();
+        boolean withinContinuation = withinStepContinuationEnvelope(feet, admission, step.kind(), step.ticks());
         boolean currentDrift = step.kind() == WalkedStep.Kind.SWIM && admission.sourceWater()
+                && !withinContinuation
                 && withinStepSwimCurrentEnvelope(feet, admission.origin(), admission.destination());
         if (!step.cell().equals(admission.destination())
-                || (!withinStepContinuationEnvelope(feet, admission, step.kind(), step.ticks()) && !currentDrift)) {
-            return false;
+                || (!withinContinuation && !currentDrift)) {
+            return rejectObservedStepContinuation(bot, step, admission, "outside_admitted_corridor");
         }
         if (admission.hiddenWorldScan()) {
-            return SwimRoute.hiddenWorldScanAllowed(bot);
+            return SwimRoute.hiddenWorldScanAllowed(bot)
+                    || rejectObservedStepContinuation(bot, step, admission, "hidden_scan_revoked");
         }
         SwimRoute.Cell observed = SwimRoute.observedCell(bot, bot.level(), step.cell(), false);
         if (observed == null) {
-            return false;
+            return rejectObservedStepContinuation(bot, step, admission, "destination_unobserved");
         }
         // A changing fluid state is not merely an occlusion change: WalkedStep's dry and swim
         // validators read different terrain. Fail closed instead of letting a formerly dry
         // landing flood (or water drain) between admission and this pre-tick proof.
         if (step.kind() == WalkedStep.Kind.SWIM ? !observed.isWater() : observed != SwimRoute.Cell.DRY) {
-            return false;
+            return rejectObservedStepContinuation(bot, step, admission, "destination_changed");
         }
         // The widened envelope above is solely for a current displacement, never a second route
         // cell. Keep it only while that displaced feet cell is itself visibly water; this lets a
@@ -1653,10 +1770,22 @@ final class FollowSwimming {
         if (currentDrift) {
             SwimRoute.Cell current = SwimRoute.observedCell(bot, bot.level(), feet, false);
             if (current == null || !current.isWater()) {
-                return false;
+                return rejectObservedStepContinuation(bot, step, admission, "current_drift_unobserved");
             }
         }
-        return SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind());
+        return SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind())
+                || rejectObservedStepContinuation(bot, step, admission, "refusal_envelope_unobserved");
+    }
+
+    /** Emits the precise pre-validation reason when a guarded local stroke must fail closed. */
+    private static boolean rejectObservedStepContinuation(AIPlayerEntity bot, WalkedStep step,
+                                                          StepAdmission admission, String reason) {
+        BotLog.action(bot, "follow_swim_guard_refused", "why", reason,
+                "kind", step.kind(), "ticks", step.ticks(),
+                "feet", bot.blockPosition().toShortString(),
+                "origin", admission.origin().toShortString(),
+                "destination", admission.destination().toShortString());
+        return false;
     }
 
     private static boolean withinStepContinuationEnvelope(BlockPos feet, StepAdmission admission,
@@ -1702,12 +1831,14 @@ final class FollowSwimming {
 
     /**
      * A water current can displace a swimmer one local cell before their next input tick. This is
-     * deliberately no wider than one cell around the already-admitted stroke, and callers must
+     * deliberately limited to horizontal strokes: vertical bobbing belongs to the normal bounded
+     * settling envelope above, rather than to an external current displacement. Callers must
      * still prove the displaced feet cell is observed water before keeping the input alive.
      */
     private static boolean withinStepSwimCurrentEnvelope(BlockPos feet, BlockPos origin,
                                                           BlockPos destination) {
-        return feet.getX() >= Math.min(origin.getX(), destination.getX()) - 1
+        return origin.getY() == destination.getY()
+                && feet.getX() >= Math.min(origin.getX(), destination.getX()) - 1
                 && feet.getX() <= Math.max(origin.getX(), destination.getX()) + 1
                 && feet.getZ() >= Math.min(origin.getZ(), destination.getZ()) - 1
                 && feet.getZ() <= Math.max(origin.getZ(), destination.getZ()) + 1
@@ -1755,9 +1886,17 @@ final class FollowSwimming {
             // after a profile/capability change restores strict survival. Cancel before the action
             // pack advances; the normal branch below can only start a freshly observed step.
             StepAdmission admission = stepAdmission;
+            boolean withinContinuation = admission != null && withinStepContinuationEnvelope(
+                    bot.blockPosition(), admission, pack.activeStepKind(), pack.activeStepTicks());
+            boolean currentDrift = admission != null
+                    && pack.activeStepKind() == WalkedStep.Kind.SWIM
+                    && admission.sourceWater()
+                    && !withinContinuation
+                    && withinStepSwimCurrentEnvelope(bot.blockPosition(), admission.origin(), admission.destination());
             if (admission == null || admission.hiddenWorldScan() != SwimRoute.hiddenWorldScanAllowed(bot)
-                    || !withinStepContinuationEnvelope(bot.blockPosition(), admission, pack.activeStepKind(),
-                    pack.activeStepTicks())) {
+                    || !withinContinuation && !currentDrift) {
+                // The guarded ActionPack tick immediately re-proves a current-displaced water
+                // cell. Do not cancel that already-admitted stroke one owner tick earlier.
                 cancelStep(bot);
                 clearRoute();
                 nextRouteSearchTick = 0;
@@ -1913,10 +2052,10 @@ final class FollowSwimming {
 
     /**
      * Whether this class must take a land-bound tick from land follow. Genuine swimming always does.
-     * Wading (feet wet, head clear, solid bottom) is ordinary walking and stays with land follow --
-     * except in the middle of a shallow, where land follow has no legal start cell (a wet cell is
-     * never "standable", and its start snap only reaches a dry neighbour): there the bot would sit
-     * forever, so it wades out along a water route.
+     * A wader with an observed dry neighbour is handled by the preceding exact dry egress; this
+     * fallback keeps in-range waders with land follow and sends only a middle-shallow wader (with
+     * no locally proved dry landing) through the water route rather than giving land routing a wet
+     * start cell.
      */
     private boolean needsWaterExit(AIPlayerEntity bot, ServerPlayer target, double standoff) {
         if (isSwimming(bot)) {

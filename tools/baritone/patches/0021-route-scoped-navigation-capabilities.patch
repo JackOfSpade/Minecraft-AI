@@ -1,0 +1,295 @@
+Route every capability that can change a path through IPlayerContext rather than
+the mutable JVM-wide settings object. CalculationContext snapshots those values,
+and copied-chunk BlockStateInterface instances freeze the host's cell authority
+before a worker starts. PrecomputedData receives the route's vine decision when
+it is constructed so its worker-lazy cache cannot borrow a later bot's setting.
+
+diff --git a/src/api/java/baritone/api/utils/IPlayerContext.java b/src/api/java/baritone/api/utils/IPlayerContext.java
+--- a/src/api/java/baritone/api/utils/IPlayerContext.java
++++ b/src/api/java/baritone/api/utils/IPlayerContext.java
+@@ -145,6 +145,35 @@ public interface IPlayerContext {
+         return BaritoneAPI.getSettings().allowWaterBucketFall.value;
+     }
+ 
++    /** Movement switches and fall ceilings that a host may bind to this route instead of JVM-wide Settings. */
++    default boolean allowNavigationParkour() {
++        return BaritoneAPI.getSettings().allowParkour.value;
++    }
++
++    default boolean allowNavigationParkourPlace() {
++        return BaritoneAPI.getSettings().allowParkourPlace.value;
++    }
++
++    default boolean allowNavigationParkourAscend() {
++        return BaritoneAPI.getSettings().allowParkourAscend.value;
++    }
++
++    default boolean allowNavigationVines() {
++        return BaritoneAPI.getSettings().allowVines.value;
++    }
++
++    default boolean allowNavigationMobAvoidance() {
++        return BaritoneAPI.getSettings().avoidance.value;
++    }
++
++    default int navigationMaxFallHeightNoWater() {
++        return BaritoneAPI.getSettings().maxFallHeightNoWater.value;
++    }
++
++    default int navigationMaxFallHeightBucket() {
++        return BaritoneAPI.getSettings().maxFallHeightBucket.value;
++    }
++
+     /**
+      * Provides an immutable state previously observed for this navigation cell, or {@code null} when none is known.
+      * Hosts that return a state must make it safe to read from Baritone worker threads and must not read a live chunk.
+diff --git a/src/api/java/baritone/api/utils/IPlayerContext.java b/src/api/java/baritone/api/utils/IPlayerContext.java
+--- a/src/api/java/baritone/api/utils/IPlayerContext.java
++++ b/src/api/java/baritone/api/utils/IPlayerContext.java
+@@ -153,6 +182,36 @@ public interface IPlayerContext {
+     default BlockState navigationCellState(int x, int y, int z) {
+         return null;
+     }
+
++    /**
++     * The immutable cell authority captured by a threaded calculation. Hosts that restrict
++     * navigation override {@link #captureNavigationSnapshot()} so a worker cannot see a route
++     * replacement after its {@code CalculationContext} has been constructed.
++     */
++    interface NavigationSnapshot {
++        BlockState navigationCellState(int x, int y, int z);
++
++        boolean allowNavigationCell(int x, int y, int z);
++    }
++
++    /**
++     * Captures the navigation-cell callbacks used by a copied-chunk calculation. The default
++     * retains upstream behavior; a restrictive host returns an immutable snapshot.
++     */
++    default NavigationSnapshot captureNavigationSnapshot() {
++        IPlayerContext source = this;
++        return new NavigationSnapshot() {
++            @Override
++            public BlockState navigationCellState(int x, int y, int z) {
++                return source.navigationCellState(x, y, z);
++            }
++
++            @Override
++            public boolean allowNavigationCell(int x, int y, int z) {
++                return source.allowNavigationCell(x, y, z);
++            }
++        };
++    }
++
+     /**
+      * Whether this player may inspect the cell at {@code (x, y, z)} while planning navigation. A host that limits
+diff --git a/src/main/java/baritone/pathing/movement/CalculationContext.java b/src/main/java/baritone/pathing/movement/CalculationContext.java
+--- a/src/main/java/baritone/pathing/movement/CalculationContext.java
++++ b/src/main/java/baritone/pathing/movement/CalculationContext.java
+@@ -20,6 +20,7 @@ package baritone.pathing.movement;
+ import baritone.Baritone;
+ import baritone.api.IBaritone;
+ import baritone.api.pathing.movement.ActionCosts;
++import baritone.api.utils.IPlayerContext;
+ import baritone.cache.WorldData;
+ import baritone.pathing.precompute.PrecomputedData;
+ import baritone.utils.BlockStateInterface;
+@@ -94,22 +95,23 @@ public class CalculationContext {
+     public CalculationContext(IBaritone baritone, boolean forUseOnAnotherThread) {
+-        this.precomputedData = new PrecomputedData();
+         this.safeForThreadedUse = forUseOnAnotherThread;
+         this.baritone = baritone;
+-        Player player = baritone.getPlayerContext().player();
+-        this.world = baritone.getPlayerContext().world();
+-        this.worldData = (WorldData) baritone.getPlayerContext().worldData();
+-        this.bsi = new BlockStateInterface(baritone.getPlayerContext(), forUseOnAnotherThread);
++        IPlayerContext playerContext = baritone.getPlayerContext();
++        this.precomputedData = new PrecomputedData(playerContext.allowNavigationVines());
++        Player player = playerContext.player();
++        this.world = playerContext.world();
++        this.worldData = (WorldData) playerContext.worldData();
++        this.bsi = new BlockStateInterface(playerContext, forUseOnAnotherThread);
+         this.toolSet = new ToolSet(player, true, forUseOnAnotherThread);
+-        this.hasThrowaway = baritone.getPlayerContext().allowPlace() && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway();
+-        this.hasWaterBucket = baritone.getPlayerContext().allowWaterBucketFall() && Inventory.isHotbarSlot(player.getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) && world.dimension() != Level.NETHER;
++        this.hasThrowaway = playerContext.allowPlace() && ((Baritone) baritone).getInventoryBehavior().hasGenericThrowaway();
++        this.hasWaterBucket = playerContext.allowWaterBucketFall() && Inventory.isHotbarSlot(player.getInventory().findSlotMatchingItem(STACK_BUCKET_WATER)) && world.dimension() != Level.NETHER;
+         this.canSprint = Baritone.settings().allowSprint.value && player.getFoodData().getFoodLevel() > 6;
+         this.placeBlockCost = Baritone.settings().blockPlacementPenalty.value;
+-        this.allowBreak = baritone.getPlayerContext().allowBreak();
++        this.allowBreak = playerContext.allowBreak();
+         this.allowBreakAnyway = new ArrayList<>(Baritone.settings().allowBreakAnyway.value);
+-        this.allowParkour = Baritone.settings().allowParkour.value;
+-        this.allowParkourPlace = Baritone.settings().allowParkourPlace.value;
++        this.allowParkour = playerContext.allowNavigationParkour();
++        this.allowParkourPlace = playerContext.allowNavigationParkourPlace();
+         this.allowJumpAtBuildLimit = Baritone.settings().allowJumpAtBuildLimit.value;
+-        this.allowParkourAscend = Baritone.settings().allowParkourAscend.value;
++        this.allowParkourAscend = playerContext.allowNavigationParkourAscend();
+         this.assumeWalkOnWater = Baritone.settings().assumeWalkOnWater.value;
+         this.allowFallIntoLava = false; // Super secret internal setting for ElytraBehavior
+         // todo: technically there can now be datapack enchants that replace blocks with any other at any range
+@@ -130,8 +132,8 @@ public class CalculationContext {
+         this.allowDiagonalAscend = Baritone.settings().allowDiagonalAscend.value;
+         this.allowDownward = Baritone.settings().allowDownward.value;
+         this.minFallHeight = 3; // Minimum fall height used by MovementFall
+-        this.maxFallHeightNoWater = Baritone.settings().maxFallHeightNoWater.value;
+-        this.maxFallHeightBucket = Baritone.settings().maxFallHeightBucket.value;
++        this.maxFallHeightNoWater = playerContext.navigationMaxFallHeightNoWater();
++        this.maxFallHeightBucket = playerContext.navigationMaxFallHeightBucket();
+         float waterSpeedMultiplier = 1.0f;
+         OUTER: for (EquipmentSlot slot : EquipmentSlot.values()) {
+             ItemEnchantments itemEnchantments = baritone.getPlayerContext()
+diff --git a/src/main/java/baritone/pathing/precompute/PrecomputedData.java b/src/main/java/baritone/pathing/precompute/PrecomputedData.java
+--- a/src/main/java/baritone/pathing/precompute/PrecomputedData.java
++++ b/src/main/java/baritone/pathing/precompute/PrecomputedData.java
+@@ -25,6 +25,12 @@ import net.minecraft.world.level.block.state.BlockState;
+ public class PrecomputedData {
+ 
+     private final byte[] data = new byte[Block.BLOCK_STATE_REGISTRY.size()];
++    private final boolean allowVines;
++
++    /** The climbability switch is route-scoped because this cache is populated lazily by workers. */
++    public PrecomputedData(boolean allowVines) {
++        this.allowVines = allowVines;
++    }
+ 
+     /**
+      * byte layout
+@@ -45,7 +51,7 @@ public class PrecomputedData {
+     private int fillData(int id, BlockState state) {
+         byte blockData = 0;
+ 
+-        Ternary canWalkOnState = MovementHelper.canWalkOnBlockState(state);
++        Ternary canWalkOnState = MovementHelper.canWalkOnBlockState(state, allowVines);
+         switch (canWalkOnState) {
+             case YES -> blockData |= CAN_WALK_ON_MASK;
+             case MAYBE -> blockData |= CAN_WALK_ON_MAYBE_MASK;
+diff --git a/src/main/java/baritone/pathing/movement/MovementHelper.java b/src/main/java/baritone/pathing/movement/MovementHelper.java
+--- a/src/main/java/baritone/pathing/movement/MovementHelper.java
++++ b/src/main/java/baritone/pathing/movement/MovementHelper.java
+@@ -407,7 +407,7 @@ public interface MovementHelper extends ActionCosts, Helper {
+         if (!bsi.isNavigationCellAllowed(x, y, z)) {
+             return false;
+         }
+-        Ternary canWalkOn = canWalkOnBlockState(state);
++        Ternary canWalkOn = canWalkOnBlockState(state, bsi.allowNavigationVines());
+         if (canWalkOn == YES) {
+             return true;
+         }
+@@ -418,6 +418,11 @@ public interface MovementHelper extends ActionCosts, Helper {
+     }
+ 
+     static Ternary canWalkOnBlockState(BlockState state) {
++        return canWalkOnBlockState(state, Baritone.settings().allowVines.value);
++    }
++
++    /** Keeps a route's vine decision stable even when the lazy cache fills on a worker. */
++    public static Ternary canWalkOnBlockState(BlockState state, boolean allowVines) {
+         Block block = state.getBlock();
+         if (isBlockNormalCube(state) && (block != Blocks.MAGMA_BLOCK || Baritone.settings().allowWalkOnMagmaBlocks.value) && block != Blocks.BUBBLE_COLUMN && block != Blocks.HONEY_BLOCK) {
+             return YES;
+@@ -425,7 +430,7 @@ public interface MovementHelper extends ActionCosts, Helper {
+         if (block instanceof AzaleaBlock) {
+             return YES;
+         }
+-        if (block == Blocks.LADDER || (isClimbable(block) && Baritone.settings().allowVines.value)) { // TODO reconsider this
++        if (block == Blocks.LADDER || (isClimbable(block) && allowVines)) { // TODO reconsider this
+             return YES;
+         }
+         if (block == Blocks.FARMLAND || block == Blocks.DIRT_PATH || block == Blocks.SOUL_SAND) {
+diff --git a/src/main/java/baritone/utils/BlockStateInterface.java b/src/main/java/baritone/utils/BlockStateInterface.java
+--- a/src/main/java/baritone/utils/BlockStateInterface.java
++++ b/src/main/java/baritone/utils/BlockStateInterface.java
+@@ -91,6 +91,11 @@ public class BlockStateInterface {
+         return ctx.allowNavigationCell(x, y, z);
+     }
+ 
++    /** The route-scoped vine policy used by non-precomputed movement helpers. */
++    public boolean allowNavigationVines() {
++        return ctx.allowNavigationVines();
++    }
++
+     public static Block getBlock(IPlayerContext ctx, BlockPos pos) { // won't be called from the pathing thread because the pathing thread doesn't make a single blockpos pog
+         return get(ctx, pos).getBlock();
+     }
+diff --git a/src/main/java/baritone/utils/BlockStateInterface.java b/src/main/java/baritone/utils/BlockStateInterface.java
+--- a/src/main/java/baritone/utils/BlockStateInterface.java
++++ b/src/main/java/baritone/utils/BlockStateInterface.java
+@@ -42,6 +42,9 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
+ public class BlockStateInterface {
+ 
+     private final IPlayerContext ctx;
++    /** Captured only for copied-chunk calculations; normal executor contexts stay live. */
++    private final IPlayerContext.NavigationSnapshot navigationSnapshot;
++    private final boolean capturedNavigationVines;
+     private final ChunkSource provider;
+     private final WorldData worldData;
+     protected final Level world;
+@@ -63,6 +66,11 @@ public class BlockStateInterface {
+ 
+     public BlockStateInterface(IPlayerContext ctx, boolean copyLoadedChunks) {
+         this.ctx = ctx;
++        if (!ctx.minecraft().isSameThread()) {
++            throw new IllegalStateException("BlockStateInterface must be constructed on the main thread");
++        }
++        this.navigationSnapshot = copyLoadedChunks ? ctx.captureNavigationSnapshot() : null;
++        this.capturedNavigationVines = copyLoadedChunks && ctx.allowNavigationVines();
+         this.world = ctx.world();
+         this.worldBorder = new BetterWorldBorder(world.getWorldBorder());
+         this.worldData = (WorldData) ctx.worldData();
+@@ -72,9 +80,6 @@ public class BlockStateInterface {
+             this.provider = world.getChunkSource();
+         }
+         this.useTheRealWorld = !Baritone.settings().pathThroughCachedOnly.value;
+-        if (!ctx.minecraft().isSameThread()) {
+-            throw new IllegalStateException("BlockStateInterface must be constructed on the main thread");
+-        }
+         this.isPassableBlockPos = new BlockPos.MutableBlockPos();
+         this.access = new BlockStateInterfaceAccessWrapper(this);
+     }
+@@ -88,12 +93,13 @@ public class BlockStateInterface {
+      * This distinguishes a denied cell from the virtual bedrock returned by {@link #get0(int, int, int)}.
+      */
+     public boolean isNavigationCellAllowed(int x, int y, int z) {
+-        return ctx.allowNavigationCell(x, y, z);
++        IPlayerContext.NavigationSnapshot snapshot = navigationSnapshot;
++        return snapshot == null ? ctx.allowNavigationCell(x, y, z) : snapshot.allowNavigationCell(x, y, z);
+     }
+ 
+     /** The route-scoped vine policy used by non-precomputed movement helpers. */
+     public boolean allowNavigationVines() {
+-        return ctx.allowNavigationVines();
++        return navigationSnapshot == null ? ctx.allowNavigationVines() : capturedNavigationVines;
+     }
+ 
+     public static Block getBlock(IPlayerContext ctx, BlockPos pos) { // won't be called from the pathing thread because the pathing thread doesn't make a single blockpos pog
+@@ -111,12 +117,14 @@ public class BlockStateInterface {
+     }
+ 
+     public BlockState get0(int x, int y, int z) { // Mickey resigned
+-        BlockState navigationState = ctx.navigationCellState(x, y, z);
++        IPlayerContext.NavigationSnapshot snapshot = navigationSnapshot;
++        BlockState navigationState = snapshot == null ? ctx.navigationCellState(x, y, z)
++                : snapshot.navigationCellState(x, y, z);
+         if (navigationState != null) {
+             return navigationState;
+         }
+ 
+-        if (!ctx.allowNavigationCell(x, y, z)) {
++        if (!(snapshot == null ? ctx.allowNavigationCell(x, y, z) : snapshot.allowNavigationCell(x, y, z))) {
+             return BLOCKED;
+         }
+ 
+diff --git a/src/main/java/baritone/utils/pathing/Avoidance.java b/src/main/java/baritone/utils/pathing/Avoidance.java
+--- a/src/main/java/baritone/utils/pathing/Avoidance.java
++++ b/src/main/java/baritone/utils/pathing/Avoidance.java
+@@ -61,7 +61,7 @@ public class Avoidance {
+     }
+ 
+     public static List<Avoidance> create(IPlayerContext ctx) {
+-        if (!Baritone.settings().avoidance.value) {
++        if (!ctx.allowNavigationMobAvoidance()) {
+             return Collections.emptyList();
+         }
+         List<Avoidance> res = new ArrayList<>();

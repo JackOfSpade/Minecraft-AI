@@ -135,6 +135,64 @@ class BaritoneExecutionContractTest {
         assertEquals(0.3F, BotInputBridge.SNEAK_SCALE);
     }
 
+    @Test
+    void aFreshFollowCalculationMayCarryOnlyOnePriorExecutorDirection() throws IOException {
+        String bridge = read("baritone/BotInputBridge.java");
+        String driver = read("baritone/BaritoneDriver.java");
+        String registry = read("baritone/BaritoneRegistry.java");
+
+        assertTrue(driver.contains("BotInputBridge.releaseForFollowHandoff(bot);"),
+                "only a natural driver release may consider arming the follow calculation handoff");
+        assertTrue(bridge.contains("executor == null")
+                        && bridge.contains("getInProgress().isPresent()")
+                        && bridge.contains("takeFollowHandoff(bot, entry)"),
+                "the old direction is available only while the replacement is calculating, never over an executor's own keys");
+        assertTrue(bridge.contains("instanceof FollowTask") && bridge.contains("bot.getActionPack().hasBaritoneRoute()")
+                        && bridge.contains("isLevelFollowHandoff(bot, entry, entry.observedRoute)")
+                        && bridge.contains("entry.followHandoffFeetY == feetY")
+                        && bridge.contains("isLevelDryFollowHandoffRoute(route, feetY, bot.isInWater())")
+                        && bridge.contains("route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT")
+                        && bridge.contains("route.resolvedGoal()")
+                        && bridge.contains("!isLandFollowRoute(route) || inWater")
+                        && bridge.contains("bot.onGround()") && bridge.contains("bot.onClimbable()")
+                        && bridge.contains("entry.lastBridgeRoute == sourceRoute")
+                        && bridge.contains("FOLLOW_HANDOFF_TICKS = 1")
+                        && bridge.contains("clearFollowHandoff(entry);"),
+                "continuity is land-follow scoped, dry/level/supported at both ends, and consumed after one tick");
+        String release = method(bridge, "static void releaseForFollowHandoff(AIPlayerEntity bot) {");
+        assertTrue(release.contains("isNaturalFollowHandoffCompletion(BaritoneNavigator.progress(bot, sourceRoute))")
+                        && bridge.contains("return progress == NavRoute.Progress.ARRIVED;"),
+                "only a navigator-confirmed arrival may issue a receipt; failed or ended-short paths are neutralized");
+        assertTrue(bridge.contains("PaceRules.inputScale(effectiveSneak, bot.isUsingItem())"),
+                "the continued raw key still passes through the ordinary shield/use-item pace calculation");
+        assertTrue(bridge.contains("ActionPack.reprojectControllerInputs(entry.followHandoffForward")
+                        && bridge.contains("entry.followHandoffYaw, bot.getYRot())"),
+                "a shield rotation must preserve the previous executor's world-space direction");
+        assertTrue(bridge.contains("entry.followHandoffSprinting")
+                        && bridge.contains("(sprintWanted(baritone) || handoffSprinting)")
+                        && bridge.contains("entry.followHandoffSprinting = false;")
+                        && registry.contains("boolean lastBridgeSprinting;")
+                        && registry.contains("boolean followHandoffSprinting;"),
+                "a level-safe handoff preserves the prior executor's sprint intent without bypassing current pace constraints");
+        assertTrue(bridge.contains("clearFollowInputContinuity(entry);")
+                        && registry.contains("BotInputBridge.clearFollowInputContinuity(entry);")
+                        && registry.contains("float lastBridgeForward;")
+                        && registry.contains("float followHandoffYaw;")
+                        && registry.contains("NavRoute lastBridgeRoute;")
+                        && registry.contains("int followHandoffFeetY = Integer.MIN_VALUE;")
+                        && registry.contains("boolean followHandoffAvailable;"),
+                "ordinary release/preemption clears retained input rather than letting it become a movement owner");
+        int replacement = registry.indexOf("void cancelForReplacement(AIPlayerEntity bot, String why)");
+        int retain = registry.indexOf("boolean retainNaturalFollowHandoff = entry.followHandoffAvailable", replacement);
+        int replacementHalt = registry.indexOf("halt(entry, bot, retainNaturalFollowHandoff);", retain);
+        int scopedClear = registry.indexOf("if (!retainNaturalFollowHandoff)", replacementHalt);
+        assertTrue(replacement >= 0 && retain > replacement && replacementHalt > retain && scopedClear > replacementHalt
+                        && registry.substring(retain, replacementHalt).contains("!entry.driven")
+                        && registry.substring(retain, replacementHalt).contains("!BaritoneDriver.busy(entry.baritone)")
+                        && registry.substring(retain, replacementHalt).contains("followHandoffExpiresAt"),
+                "an accepted successor preserves only a live, naturally released follow receipt while cancelling every old route authority");
+    }
+
     private static int occurrences(String text, String needle) {
         int count = 0;
         for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + 1)) {

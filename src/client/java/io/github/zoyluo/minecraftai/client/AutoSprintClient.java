@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.client;
 
 import io.github.zoyluo.minecraftai.network.payload.AutoSprintControlS2C;
 import net.minecraft.client.CameraType;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
@@ -87,15 +88,13 @@ public final class AutoSprintClient {
 
     private void deactivate(Minecraft client) {
         if (keysApplied) {
-            client.options.keyUp.setDown(false);
-            client.options.keyDown.setDown(false);
-            client.options.keyLeft.setDown(false);
-            client.options.keyRight.setDown(false);
-            client.options.keyJump.setDown(false);
-            client.options.keyShift.setDown(false);
-            client.options.keySprint.setDown(false);
+            // Do not clear bindings to false here. A physical key that is already held does not
+            // emit another press event after an override ends, so doing that stranded movement
+            // until the player released and pressed it again. Vanilla's poll restores every
+            // binding from the keyboard/mouse state immediately, including held keys.
+            KeyMapping.setAll();
             if (client.player != null) {
-                client.player.setSprinting(false);
+                client.player.setSprinting(client.options.keySprint.isDown());
             }
         }
         active = false;

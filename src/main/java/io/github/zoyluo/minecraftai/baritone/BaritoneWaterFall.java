@@ -8,7 +8,6 @@ import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.RotationUtils;
 import baritone.pathing.movement.movements.MovementFall;
-import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.LookAction;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
@@ -54,7 +53,7 @@ final class BaritoneWaterFall {
 
     /** Whether the config and the dimension allow a bucket fall for this bot at all. */
     static boolean enabled(AIPlayerEntity bot) {
-        return MinecraftAiConfig.get().nav().baritoneCaps().waterBucketFallEnabled() && !waterEvaporates(bot, bot.blockPosition());
+        return BaritoneSettings.waterBucketFallEnabled(bot) && !waterEvaporates(bot, bot.blockPosition());
     }
 
     static boolean waterEvaporates(AIPlayerEntity bot, BlockPos pos) {
@@ -93,7 +92,7 @@ final class BaritoneWaterFall {
         if (!isFallBucket(item)) {
             return "item_not_allowed";
         }
-        if (!MinecraftAiConfig.get().nav().baritoneCaps().waterBucketFallEnabled()) {
+        if (!BaritoneSettings.waterBucketFallEnabled(bot)) {
             return "water_fall_off";
         }
         MovementFall fall = runningFall(bot);

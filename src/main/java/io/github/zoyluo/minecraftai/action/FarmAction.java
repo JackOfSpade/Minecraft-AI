@@ -165,6 +165,17 @@ public final class FarmAction {
                 || state.is(Blocks.ROOTED_DIRT);
     }
 
+    /**
+     * Pure approach admission for tilling or planting.  This retains the farm-specific strict
+     * observation fence and then asks the exact same top-face probe that the eventual vanilla
+     * item use performs.  In particular, vanilla's block-AABB interaction range alone is not
+     * enough for a diagonal farmland click whose reachable face samples are farther away.
+     */
+    public static boolean canUseTopFace(AIPlayerEntity bot, BlockPos ground) {
+        return ObservableWorldQuery.canObserveFarmCellStrict(bot, ground)
+                && BuildAction.canUseItemOnFace(bot, ground, Direction.UP);
+    }
+
     private static OptionalInt findHoeSlot(AIPlayerEntity bot) {
         var inventory = bot.getInventory();
         for (int slot = 0; slot < inventory.getNonEquipmentItems().size(); slot++) {

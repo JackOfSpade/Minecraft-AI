@@ -15,6 +15,8 @@ import io.github.zoyluo.minecraftai.mixin.ChunkMapPlayerStatusInvokerMixin;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavigationControllerOwner;
 import io.github.zoyluo.minecraftai.navigation.NavigationMeasurement;
+import io.github.zoyluo.minecraftai.navigation.MovementBoundarySweep;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerLevel;
@@ -23,9 +25,12 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.Relative;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.gamerules.GameRules;
+import net.minecraft.world.phys.Vec3;
 
 public class AIPlayerEntity extends ServerPlayer {
     private final ActionPack actionPack = new ActionPack(this);
@@ -127,6 +132,49 @@ public class AIPlayerEntity extends ServerPlayer {
         } finally {
             NavigationMeasurement.endBotTick(this, navigationMeasurementStarted);
         }
+    }
+
+    /**
+     * The last physical boundary before vanilla collision resolution can turn a mathematically
+     * safe diagonal or a residual sprint into an outside feet cell. The route/planner proofs
+     * reject known movement footprints first; this protects collision-axis ordering, momentum,
+     * and a vertical floor without cancelling Baritone from inside {@code Entity.move}.
+     */
+    @Override
+    public void move(MoverType moverType, Vec3 requestedDelta) {
+        NavRoute.MovementBoundary boundary = BaritoneRegistry.INSTANCE.movementBoundaryForPhysics(this);
+        if (boundary == null || requestedDelta == null) {
+            super.move(moverType, requestedDelta);
+            return;
+        }
+        // Mirror vanilla's collision query before deciding whether a negative gravity component
+        // would actually lower the feet. `onGround` is only the prior tick's state: a body can
+        // walk off the end of its support in this move, so only a collision-resolved vertical
+        // delta may be omitted from the boundary sweep.
+        Vec3 collisionResolved = MovementBoundarySweep.collisionResolvedDelta(this, requestedDelta);
+        Vec3 boundaryDelta = MovementBoundarySweep.collisionAwareDelta(requestedDelta, collisionResolved);
+        MovementBoundarySweep.Result sweep = MovementBoundarySweep.clip(boundary, this.position(), boundaryDelta);
+        if (!sweep.refused()) {
+            super.move(moverType, requestedDelta);
+            return;
+        }
+
+        // Do not revoke a route while vanilla is iterating its movement state. The driver reads
+        // this latch immediately after physics, then performs ordinary route teardown on the
+        // server thread. Releasing inputs now prevents a clipped move from carrying a stale key
+        // into a later movement call in this tick.
+        BaritoneRegistry.INSTANCE.noteMovementBoundaryPhysicsRefusal(this);
+        BaritoneRegistry.INSTANCE.clearMovementBoundaryInputs(this);
+        // Once a move was refused, pass precisely the swept prefix. Reintroducing the original
+        // downward probe after clipping horizontal motion could turn a supported edge into a
+        // real walk-off; ordinary permitted moves above still retain vanilla's full input.
+        super.move(moverType, sweep.permittedDelta());
+        this.setDeltaMovement(Vec3.ZERO);
+        this.zza = 0.0F;
+        this.xxa = 0.0F;
+        this.setJumping(false);
+        this.setShiftKeyDown(false);
+        this.setSprinting(false);
     }
 
     /** The most a bot legitimately moves horizontally in one tick (sprint-jumping is ~0.35); a longer displacement was not walking. */
@@ -509,15 +557,23 @@ public class AIPlayerEntity extends ServerPlayer {
     }
 
     /**
-     * Keep the retained loadout out of third-party grave hooks as well.  Fiw Graves injects into
+     * Keep the retained loadout out of third-party grave hooks as well. Fiw Graves injects into
      * {@code ServerPlayer.dropAllDeathLoot} and otherwise clears every inventory slot into a
-     * grave-head before the ten-second companion revive can happen.  Dispatching through this
+     * grave-head before the ten-second companion revive can happen. Dispatching through this
      * subclass override bypasses that player-wide hook only for Minecraft-AI companions; human
      * players still use their normal grave behaviour.
+     *
+     * <p>Experience is deliberately not part of the retained loadout. {@link Player} always
+     * reports itself as an experience dropper, so {@link #dropExperience(ServerLevel, Entity)}
+     * alone would bypass the {@code keepInventory} decision that normally surrounds it. Make that
+     * rule check here, then use only the focused XP call so inventory and equipment never enter
+     * vanilla or a grave hook.</p>
      */
     @Override
     protected void dropAllDeathLoot(ServerLevel level, DamageSource source) {
-        // Intentionally empty: no vanilla or third-party death-loot processing for companions.
+        if (!level.getGameRules().get(GameRules.KEEP_INVENTORY)) {
+            this.dropExperience(level, source.getEntity());
+        }
     }
 
     @Override

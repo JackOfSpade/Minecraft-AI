@@ -24,6 +24,12 @@ public final class BotTickCoordinator {
             // the whole tick while the companion is dead, so no navigation, equipment, shield or
             // goal code can act on a zero-health fake player.
             if (DangerWatcher.INSTANCE.tickDeathRespawn(server, bot)) {
+                // A dead companion stays in AIPlayerManager until its delayed respawn, so the
+                // end-of-tick live collection alone cannot retire its vibration listener.  The
+                // death path deliberately skips tickBot below; detach here on every owned death
+                // tick (including the revival tick) and let the next living tick register fresh
+                // ears in the current level.
+                io.github.zoyluo.minecraftai.perception.CreatureSenses.INSTANCE.forget(bot.getUUID());
                 continue;
             }
             // An owner death cancels ordinary work. Give the local fight-then-hold stance the
@@ -64,10 +70,13 @@ public final class BotTickCoordinator {
             // shield it raised that nothing threatens any more. TaskManager.tickAll ran before this coordinator, so the tasks read its
             // state on the next tick; it never consumes the tick and never throws.
             ShieldGuard.INSTANCE.tickBot(server, bot);
-            // Background cave lighting is a single immediate vanilla placement, never the old
-            // route-owning light_area job. It is therefore safe to run during an ordinary task:
-            // AutomaticLighting retains the selected slot/aim and refuses every other action owner.
-            if (!handled) {
+            // Background cave lighting is an idle reflex.  Even though its physical placement
+            // restores the selected slot and aim, it must not spend a torch behind an active
+            // task's back: light_area owns a placement budget and mining owns its torch reserve.
+            // Active tasks that need light use their own accounting-aware helper instead.
+            if (!handled && TaskManager.INSTANCE.getActive(bot).isEmpty()
+                    && !TaskManager.INSTANCE.hasPaused(bot)
+                    && !GoalExecutor.INSTANCE.hasActivePlan(bot)) {
                 AutomaticLighting.tryPlaceTorchAtFeetPassively(bot, tick);
             }
             if (!handled && GoalExecutor.INSTANCE.tickBot(server, bot)) {

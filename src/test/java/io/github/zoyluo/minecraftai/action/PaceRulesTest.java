@@ -47,6 +47,14 @@ class PaceRulesTest {
     }
 
     @Test
+    void aCurrentPinnedSwimmerKeepsItsSprintWhileLandRunningStillStops() {
+        assertTrue(PaceRules.sprintAllowed(1.0F, false, false, false, 20, false, true, true),
+                "vanilla swim sprint does not use the land collision stop, so an opposing current cannot pin the next stroke at a bank");
+        assertFalse(PaceRules.sprintAllowed(1.0F, false, false, false, 20, false, true, false),
+                "the collision exception is limited to in-water swimming");
+    }
+
+    @Test
     void sprintNeedsRealForwardInput() {
         assertFalse(allowed(0.0F, false, false, false, 20, false, false));
         assertFalse(allowed(0.3F, false, false, false, 20, false, false), "a sneak-scaled forward input");

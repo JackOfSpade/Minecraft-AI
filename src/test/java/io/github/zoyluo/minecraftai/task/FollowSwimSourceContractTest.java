@@ -36,8 +36,8 @@ final class FollowSwimSourceContractTest {
         String yieldPredicateBody = swim.substring(yieldPredicate, swim.indexOf("    /**", yieldPredicate + 1));
         assertTrue(yieldPredicateBody.contains("NavSafetyNet.INSTANCE.rescueStepOwnsMovement(bot)"),
                 "Follow must preserve Nav's live rescue stroke even after the swimmer reaches the surface");
-        assertTrue(count(swim, "mustYieldToWaterRescue(bot)") == 3,
-                "swim-after, water exit, and an in-flight step must all yield at the same boundary");
+        assertTrue(count(swim, "mustYieldToWaterRescue(bot)") == 4,
+                "swim-after, both water-exit gates (including shallow egress), and an in-flight step must all yield at the same boundary");
         String swimAfter = body(swim, "private boolean swimAfter", "private boolean ascendWhileSubmerged");
         String exit = body(swim, "boolean exitWaterForLand", "// ---- entering the water");
         String heldStep = body(swim, "private boolean holdStep", "private void clearRoute");
@@ -205,8 +205,8 @@ final class FollowSwimSourceContractTest {
                         + " BlockPos origin, BlockPos destination)"),
                 "FollowSwimming must retain capability, wet-source state, and physical source-to-destination admission of every owned step");
         int exactLease = held.indexOf("if (pack.stepInFlightFor(lease))");
-        int capabilityMismatch = held.indexOf("admission.hiddenWorldScan() != SwimRoute.hiddenWorldScanAllowed(bot)");
-        int corridorMismatch = held.indexOf("!withinStepContinuationEnvelope(", capabilityMismatch);
+        int corridorMismatch = held.indexOf("boolean withinContinuation = admission != null", exactLease);
+        int capabilityMismatch = held.indexOf("admission.hiddenWorldScan() != SwimRoute.hiddenWorldScanAllowed(bot)", corridorMismatch);
         int cancel = held.indexOf("cancelStep(bot)", corridorMismatch);
         int emergencySuccessor = held.indexOf("boolean emergencySuccessorActive = !pack.stepIdle();", cancel);
         int emergencyLatch = held.indexOf("awaitingEmergencySuccessor = true;", emergencySuccessor);
@@ -216,7 +216,7 @@ final class FollowSwimSourceContractTest {
                 "/**\n     * One tick with a step in flight");
         int successorGate = holdsTick.indexOf("if (emergencySuccessorHoldsTheTick(bot))");
         int ownStep = holdsTick.indexOf("if (!stepInFlight(bot))", successorGate);
-        assertTrue(exactLease >= 0 && capabilityMismatch > exactLease && corridorMismatch > capabilityMismatch && cancel > corridorMismatch
+        assertTrue(exactLease >= 0 && corridorMismatch > exactLease && capabilityMismatch > corridorMismatch && cancel > capabilityMismatch
                         && emergencySuccessor > cancel && emergencyLatch > emergencySuccessor
                         && result > emergencySuccessor && release > result
                         && !held.substring(emergencySuccessor, release).contains("pack.cancelStep()")
@@ -259,10 +259,12 @@ final class FollowSwimSourceContractTest {
                 "strict no-edge follow must use an observed local step before any operator standability search");
 
         String local = body(swim, "private boolean beginObservedLandApproachStep", "private Entry currentEntry");
-        assertTrue(local.contains("for (int dy = -3; dy <= 1; dy++)")
+        assertTrue(local.contains("return beginObservedDryStep(bot, goal, true, \"follow_swim_observed_land_approach\")")
+                        && local.contains("int minDy = startEnvelopeOnly ? -1 : -3;")
+                        && local.contains("for (int dy = minDy; dy <= 1; dy++)")
                         && local.contains("SwimRoute.observedCell(bot, world, candidate, false)")
                         && local.contains("follow_swim_observed_land_approach"),
-                "strict land approach must enumerate the complete local walked-step envelope and start only observed dry steps");
+                "strict land approach must delegate to the shared complete local walked-step envelope and start only observed dry steps");
 
         int helper = route.indexOf("static boolean canObserveWalkedStepRefusalEnvelope(");
         int swimReturn = route.indexOf("if (kind == WalkedStep.Kind.SWIM)", helper);
@@ -283,6 +285,44 @@ final class FollowSwimSourceContractTest {
         int rescueRefusal = rescue.indexOf("WalkedStep.refusal");
         assertTrue(rescueDestination >= 0 && rescueEnvelope > rescueDestination && rescueRefusal > rescueEnvelope,
                 "strict NavSafetyNet rescue must prove its complete refusal envelope before raw validation");
+    }
+
+    @Test
+    void observedWadingEgressPreventsLandRoutingFromStartingInWater() throws IOException {
+        String swim = read("task/FollowSwimming.java");
+        String exit = body(swim, "boolean exitWaterForLand", "// ---- entering the water");
+
+        int egress = exit.indexOf("beginObservedWadingEgressStep(bot, target.blockPosition())");
+        int normalGate = exit.indexOf("needsWaterExit(bot, target, standoff)");
+        int waterSearch = exit.indexOf("searchRoute(");
+        assertTrue(egress >= 0 && normalGate > egress && waterSearch > normalGate,
+                "an out-of-range wader must try one observed dry egress before either land handoff or a water route");
+        String egressGate = exit.substring(0, normalGate);
+        assertTrue(egressGate.contains("!forceWetExit")
+                        && egressGate.contains("!isSwimming(bot)")
+                        && egressGate.contains("isSwimCell(world, bot.blockPosition())")
+                        && egressGate.contains("bot.distanceTo(target) > standoff + WADE_ARRIVAL_SLACK"),
+                "only an out-of-range true wader may take the dry-egress owner path");
+        assertTrue(egressGate.contains("egress != ObservedDryStepResult.NONE")
+                        && egressGate.contains("waiting = egress != ObservedDryStepResult.STARTED;")
+                        && egressGate.contains("NavSafetyNet.INSTANCE.renewFollowSwim(bot)"),
+                "a proved dry egress must retain water ownership through a guarded handoff instead of falling into wet land routing");
+
+        String local = body(swim, "private ObservedDryStepResult beginObservedWadingEgressStep",
+                "private Entry currentEntry");
+        assertTrue(local.contains("beginObservedDryStep(bot, goal, false, \"follow_swim_wade_egress\", true)")
+                        && local.contains("int minDy = startEnvelopeOnly ? -1 : -3;")
+                        && local.contains("!startEnvelopeOnly || dy == 0 || Math.abs(dx) + Math.abs(dz) <= 1")
+                        && local.contains("SwimRoute.observedCell(bot, world, candidate, false)")
+                        && local.contains("return dry.isEmpty() ? ObservedDryStepResult.NONE : ObservedDryStepResult.REJECTED;"),
+                "wading egress must classify only the exact dry route-start envelope, preserving water-route work when no adjacent landing exists");
+        assertTrue(exit.contains("boolean keepWetOwnership = forceWetExit || rejectedWadingEgress || noImmediateWadingEgress;")
+                        && exit.contains("boolean noImmediateWadingEgress = false;")
+                        && exit.contains("boolean needsWetExit = keepWetOwnership || needsWaterExit(bot, target, standoff);")
+                        && exit.contains("if (!needsWetExit)")
+                        && exit.contains("waiting = keepWetOwnership;")
+                        && exit.contains("return keepWetOwnership;"),
+                "a refused dry egress must continue the wet EXIT owner through route failure/cooldown instead of handing land follow its wet start");
     }
 
     @Test
@@ -360,9 +400,9 @@ final class FollowSwimSourceContractTest {
         String followGuard = body(swim, "private static boolean canContinueObservedStep",
                 "private static WalkedStep.Kind dryStepKind");
         int followDestination = followGuard.indexOf("!step.cell().equals(admission.destination())");
-        int followProvenance = followGuard.indexOf("withinStepContinuationEnvelope(feet, admission, step.kind(), step.ticks())");
+        int followProvenance = followGuard.indexOf("boolean withinContinuation = withinStepContinuationEnvelope(");
         int followCapability = followGuard.indexOf("if (admission.hiddenWorldScan())");
-        assertTrue(followDestination >= 0 && followProvenance > followDestination && followCapability > followProvenance
+        assertTrue(followDestination >= 0 && followProvenance >= 0 && followCapability > followDestination
                         && followGuard.contains("SwimRoute.hiddenWorldScanAllowed(bot)")
                         && followGuard.contains("SwimRoute.observedCell(bot, bot.level(), step.cell(), false)")
                         && followGuard.contains("SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind())"),
@@ -371,10 +411,23 @@ final class FollowSwimSourceContractTest {
                         && followGuard.contains("observed != SwimRoute.Cell.DRY"),
                 "Follow's strict continuation guard must reject dry/water kind changes, not only total occlusion");
         assertTrue(followGuard.contains("boolean currentDrift = step.kind() == WalkedStep.Kind.SWIM && admission.sourceWater()")
+                        && followGuard.contains("&& !withinContinuation")
                         && followGuard.contains("withinStepSwimCurrentEnvelope(feet, admission.origin(), admission.destination())")
                         && followGuard.contains("SwimRoute.observedCell(bot, bot.level(), feet, false)")
                         && followGuard.contains("current == null || !current.isWater()"),
-                "an in-water follow stroke may tolerate exactly one observed current displacement, never an unproved drift");
+                "an in-water follow stroke may tolerate only a lateral current displacement outside its normal settled corridor, never an unproved drift");
+        String followReconcile = body(swim, "private boolean stepInFlight", "private boolean stepHoldsTheTick");
+        assertTrue(followReconcile.contains("boolean withinContinuation = admission != null")
+                        && followReconcile.contains("boolean currentDrift = admission != null")
+                        && followReconcile.contains("pack.activeStepKind() == WalkedStep.Kind.SWIM")
+                        && followReconcile.contains("&& !withinContinuation")
+                        && followReconcile.contains("withinStepSwimCurrentEnvelope(bot.blockPosition(), admission.origin(), admission.destination())")
+                        && followReconcile.contains("|| !withinContinuation && !currentDrift"),
+                "Follow's owner reconciliation must leave only an external bounded current displacement for the guarded action tick to re-prove");
+        String followCurrentEnvelope = body(swim, "private static boolean withinStepSwimCurrentEnvelope",
+                "private static boolean withinStepCorridor");
+        assertTrue(followCurrentEnvelope.contains("origin.getY() == destination.getY()"),
+                "a Follow current allowance applies only to horizontal swim strokes; vertical bobbing belongs to the settled stroke corridor");
         String followEnvelope = body(swim, "private static boolean withinStepContinuationEnvelope",
                 "private static boolean withinStepCorridor");
         assertTrue(followEnvelope.contains("withinStepCorridor(feet, admission.origin(), admission.destination())")
@@ -400,9 +453,9 @@ final class FollowSwimSourceContractTest {
         String rescueGuard = body(safety, "private static boolean canContinueRescueStep",
                 "private boolean beginObservableWaterRescueStep");
         int rescueDestination = rescueGuard.indexOf("!step.cell().equals(admission.destination())");
-        int rescueProvenance = rescueGuard.indexOf("withinRescueStepContinuationEnvelope(feet, admission, step.kind(), step.ticks())");
+        int rescueProvenance = rescueGuard.indexOf("boolean withinContinuation = withinRescueStepContinuationEnvelope(");
         int rescueCapability = rescueGuard.indexOf("if (admission.hiddenWorldScan())");
-        assertTrue(rescueDestination >= 0 && rescueProvenance > rescueDestination && rescueCapability > rescueProvenance
+        assertTrue(rescueDestination >= 0 && rescueProvenance >= 0 && rescueCapability > rescueDestination
                         && rescueGuard.contains("canUseHiddenWaterScan(bot)")
                         && rescueGuard.contains("observedWaterEscapeCell(bot, bot.level(), step.cell(), false)")
                         && rescueGuard.contains("SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind())"),
@@ -414,9 +467,10 @@ final class FollowSwimSourceContractTest {
                         && !rescueGuard.contains("probeWaterEscapeCell(bot, bot.level(), step.cell(), false).unknown()"),
                 "late strict SWIM continuation must reject a newly unobservable target instead of retaining stale admission proof");
         assertTrue(rescueGuard.contains("boolean currentDrift = step.kind() == WalkedStep.Kind.SWIM && admission.sourceWater()")
+                        && rescueGuard.contains("&& !withinContinuation")
                         && rescueGuard.contains("withinRescueStepCurrentEnvelope(feet, admission.origin(), admission.destination())")
                         && rescueGuard.contains("observedWaterEscapeCell(bot, bot.level(), feet, false) != WaterEscapeCell.WATER"),
-                "an in-water rescue stroke may tolerate only one re-proved current displacement");
+                "an in-water rescue stroke may tolerate only an external re-proved current displacement, preserving ordinary surface settling");
         String publicRescueOwnership = body(safety, "public boolean isWaterRescueActive(AIPlayerEntity bot)",
                 "/**\n     * True only while NavSafetyNet still owns the exact live guarded stroke");
         assertTrue(publicRescueOwnership.contains("waterRescueShore.containsKey(id)")
@@ -586,13 +640,13 @@ final class FollowSwimSourceContractTest {
         String greedySwim = body(swim, "private boolean swimStepToward",
                 "/**\n     * Continues local exploration");
         String chargedAdmission = body(swim,
-                "private boolean beginStep(AIPlayerEntity bot, BlockPos cell, String reason, boolean chargeStrictAdmission)",
+                "private StepAdmissionResult tryBeginStep(AIPlayerEntity bot, BlockPos cell, String reason,",
                 "/**\n     * ActionPack invokes this before every in-flight step terrain read");
         int greedyReserve = greedySwim.indexOf("canAffordStrictWaterWork(hiddenWorldScan, nearer.size() * 2)");
         int greedyObserve = greedySwim.indexOf("consumeStrictWaterWork(hiddenWorldScan);", greedyReserve);
         int greedyStart = greedySwim.indexOf("beginStep(bot, candidate, \"follow_swim\")", greedyObserve);
         assertTrue(greedyReserve >= 0 && greedyObserve > greedyReserve && greedyStart > greedyObserve
-                        && swim.contains("return beginStep(bot, cell, reason, true);")
+                        && swim.contains("return tryBeginStep(bot, cell, reason, true) == StepAdmissionResult.STARTED;")
                         && chargedAdmission.indexOf("!consumeStrictWaterWork(hiddenWorldScan)")
                         < chargedAdmission.indexOf("SwimRoute.observedCell"),
                 "the greedy immediate swim list must reserve and charge every observation plus its possible admission before it starts a physical step");
@@ -1095,12 +1149,14 @@ final class FollowSwimSourceContractTest {
         assertTrue(exit >= 0 && end > exit);
         String body = swim.substring(exit, end);
         assertTrue(body.contains("needsWaterExit(bot, target, standoff)"),
-                "wading through shallows must stay with land follow, not run the swim exit");
+                "a middle shallow without an observed dry landing must still use the existing water-exit decision");
         assertFalse(body.contains("if (!isSwimCell(world, bot.blockPosition()))"),
                 "merely having wet feet is not swimming");
+        int dryEgress = body.indexOf("beginObservedWadingEgressStep(bot, target.blockPosition())");
         int gate = body.indexOf("needsWaterExit(");
         int search = body.indexOf("searchRoute(");
-        assertTrue(gate >= 0 && search > gate, "no water route search before the swimming gate");
+        assertTrue(dryEgress >= 0 && gate > dryEgress && search > gate,
+                "a nearby dry shore must be handled as one observed egress; water routing begins only after that egress is unavailable");
         assertTrue(body.contains("updateAscending(bot, air, lossRate(bot), true, airPlan)")
                         && body.contains("ascendWhileSubmerged("),
                 "a submerged bot heading for land must still surface for air early");

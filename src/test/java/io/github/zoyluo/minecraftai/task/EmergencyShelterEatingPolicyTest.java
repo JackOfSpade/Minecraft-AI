@@ -95,6 +95,22 @@ class EmergencyShelterEatingPolicyTest {
                 8.0F, 20.0F, false, false, false));
     }
 
+    @Test
+    void recoveryRescueIsOnlyRequestedForABelowHalfGenuineStall() {
+        assertFalse(EmergencyShelterTask.shouldRequestRecoverySupplies(
+                18.0F, 20.0F, false, false, true),
+                "food 18+ still supports natural regeneration after the final carried item is eaten");
+        assertFalse(EmergencyShelterTask.shouldRequestRecoverySupplies(
+                12.0F, 20.0F, false, false, false),
+                "at half health or above the bot exits to fight instead of crying for an already-abandoned rescue");
+        assertTrue(EmergencyShelterTask.shouldRequestRecoverySupplies(
+                9.9F, 20.0F, false, false, false),
+                "only a below-half bot with no remaining recovery path waits sealed for help");
+        assertFalse(EmergencyShelterTask.shouldRequestRecoverySupplies(
+                9.0F, 20.0F, true, false, false),
+                "carried food means recovery has not stalled");
+    }
+
     // Point 6's 50%-HP exception: give up waiting and fight once at/above half health, otherwise
     // stay sealed and wait for a rescue.
     @Test

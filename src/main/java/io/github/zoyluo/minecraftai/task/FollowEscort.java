@@ -67,6 +67,23 @@ final class FollowEscort {
         strikes = 0;
     }
 
+    /**
+     * The complete immediate perception and legality envelope for an in-place escort swing.
+     * This is intentionally not a follow-ownership predicate: ordinary melee pressure can remain
+     * harmlessly behind or out of range while the follower keeps course, whereas a swing must
+     * always have direct physical contact eligibility right now.
+     */
+    static boolean canEngage(AIPlayerEntity bot, LivingEntity entity) {
+        return entity != null
+                && entity != bot
+                && entity.isAlive()
+                && bot.distanceTo(entity) <= ENGAGED_RANGE
+                && CombatCore.hostileTo(bot, entity)
+                && !CombatCore.isMeleeForbiddenThreat(entity)
+                && ObservableWorldQuery.canNoticeCreature(bot, entity)
+                && CombatCore.hasLineOfSight(bot, entity);
+    }
+
     /** True while the follower should not turn toward the player because it has just swung at something. */
     boolean holdsFacing(long now) {
         return lastStrikeTick != Long.MIN_VALUE && now - lastStrikeTick < NO_FACE_TICKS;
@@ -83,10 +100,7 @@ final class FollowEscort {
         List<LivingEntity> near = bot.level().getEntitiesOfClass(LivingEntity.class,
                 bot.getBoundingBox().inflate(ENGAGED_RANGE),
                 entity -> entity != bot && entity != followed && entity.isAlive()
-                        && bot.distanceTo(entity) <= ENGAGED_RANGE
-                        && CombatCore.hostileTo(bot, entity)
-                        && !CombatCore.isMeleeForbiddenThreat(entity)
-                        && ObservableWorldQuery.canNoticeCreature(bot, entity));
+                        && canEngage(bot, entity));
         if (near.isEmpty()) {
             return null;
         }

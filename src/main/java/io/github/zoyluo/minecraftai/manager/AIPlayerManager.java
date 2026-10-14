@@ -670,16 +670,103 @@ public final class AIPlayerManager {
                     "owner", owner.getGameProfile().name());
             return Optional.empty();
         }
-        for (OwnerPlacement placement : visibleCompanionSpawnPositions(world, owner)) {
-            Vec3 destination = placement.position();
-            boolean moved = bot.teleportTo(world, destination.x, destination.y, destination.z,
-                    Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
-            if (moved && isVisibleBesideOwner(bot, owner)
-                    && rebuildOwnerClientPairing(bot, owner)) {
-                return Optional.of(placement);
+        CompanionLocation original = CompanionLocation.capture(bot);
+        // Pairing is mutable tracker state just like location. A failed same-level candidate can
+        // remove the existing owner pairing before its visibility/tracker proof fails, so retain
+        // the pre-attempt truth instead of leaving the restored companion invisible.
+        boolean ownerClientPairingBefore = ownerClientPairingPresent(bot, owner);
+        boolean committed = false;
+        try {
+            for (OwnerPlacement placement : visibleCompanionSpawnPositions(world, owner)) {
+                Vec3 destination = placement.position();
+                boolean moved = bot.teleportTo(world, destination.x, destination.y, destination.z,
+                        Collections.emptySet(), bot.getYRot(), bot.getXRot(), true);
+                if (moved && isVisibleBesideOwner(bot, owner)
+                        && rebuildOwnerClientPairing(bot, owner)) {
+                    committed = true;
+                    return Optional.of(placement);
+                }
+            }
+            return Optional.empty();
+        } finally {
+            // Trying a visible cell is speculative until both the server-side visibility proof and
+            // the owner's native tracker pairing succeed. Do not leave a failed recall/portal
+            // handoff at the final candidate -- particularly not in the owner's other dimension.
+            if (!committed) {
+                if (restoreCompanionLocation(bot, original) && ownerClientPairingBefore) {
+                    restoreOwnerClientPairingAfterRollback(bot, owner);
+                }
             }
         }
-        return Optional.empty();
+    }
+
+    /** Restores every position and look component changed by an uncommitted owner-placement attempt. */
+    private static boolean restoreCompanionLocation(AIPlayerEntity bot, CompanionLocation original) {
+        boolean atOriginalLocation = bot.level() == original.world()
+                && bot.position().distanceToSqr(original.position()) < 1.0e-8D;
+        boolean restored = atOriginalLocation || bot.teleportTo(original.world(),
+                original.position().x, original.position().y, original.position().z,
+                Collections.emptySet(), original.yaw(), original.pitch(), true);
+        if (!restored) {
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
+                    "companion_owner_placement_rollback_failed",
+                    "world", original.world().dimension().identifier(),
+                    "pos", LogFields.pos(BlockPos.containing(original.position())));
+            return false;
+        }
+        bot.setYRot(original.yaw());
+        bot.setXRot(original.pitch());
+        bot.setYHeadRot(original.headYaw());
+        bot.setYBodyRot(original.bodyYaw());
+        return true;
+    }
+
+    private static boolean ownerClientPairingPresent(AIPlayerEntity bot, ServerPlayer owner) {
+        ChunkMapTrackedEntityPairingInvokerMixin pairing = ownerClientPairingTracker(bot, owner);
+        return pairing != null && pairing.minecraftai$getSeenBy().contains(owner.connection);
+    }
+
+    /**
+     * Restores only a pairing that existed before the speculative move. This deliberately does
+     * not apply the visible-adjacency fallback: after rollback the companion belongs at its
+     * original location, where the saved tracker membership is the authoritative contract.
+     */
+    private static void restoreOwnerClientPairingAfterRollback(AIPlayerEntity bot, ServerPlayer owner) {
+        if (bot.level() != owner.level()) {
+            return;
+        }
+        ChunkMapTrackedEntityPairingInvokerMixin pairing = ownerClientPairingTracker(bot, owner);
+        if (pairing == null) {
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
+                    "companion_owner_pairing_rollback_tracker_missing",
+                    "owner", owner.getGameProfile().name());
+            return;
+        }
+        if (pairing.minecraftai$getSeenBy().contains(owner.connection)) {
+            return;
+        }
+        // Player entities need their player-info row before the native add pairing can render
+        // a skin. This is the same order used by the normal recovery pairing path.
+        owner.connection.send(ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(java.util.List.of(bot)));
+        if (pairing.minecraftai$getSeenBy().add(owner.connection)) {
+            pairing.minecraftai$getServerEntity().addPairing(owner);
+        }
+        if (!pairing.minecraftai$getSeenBy().contains(owner.connection)) {
+            BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
+                    "companion_owner_pairing_rollback_failed",
+                    "owner", owner.getGameProfile().name());
+        }
+    }
+
+    private static ChunkMapTrackedEntityPairingInvokerMixin ownerClientPairingTracker(
+            AIPlayerEntity bot, ServerPlayer owner) {
+        if (bot.level() != owner.level()) {
+            return null;
+        }
+        ChunkMap chunkMap = owner.level().getChunkSource().chunkMap;
+        Object tracker = ((ChunkMapEntityTrackersAccessorMixin) (Object) chunkMap)
+                .minecraftai$getEntityTrackers().get(bot.getId());
+        return tracker instanceof ChunkMapTrackedEntityPairingInvokerMixin pairing ? pairing : null;
     }
 
     /**
@@ -693,10 +780,8 @@ public final class AIPlayerManager {
         if (bot.level() != owner.level()) {
             return false;
         }
-        ChunkMap chunkMap = owner.level().getChunkSource().chunkMap;
-        Object tracker = ((ChunkMapEntityTrackersAccessorMixin) (Object) chunkMap)
-                .minecraftai$getEntityTrackers().get(bot.getId());
-        if (!(tracker instanceof ChunkMapTrackedEntityPairingInvokerMixin pairing)) {
+        ChunkMapTrackedEntityPairingInvokerMixin pairing = ownerClientPairingTracker(bot, owner);
+        if (pairing == null) {
             BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.LIFECYCLE, bot,
                     "companion_owner_pairing_tracker_missing",
                     "owner", owner.getGameProfile().name());
@@ -787,5 +872,14 @@ public final class AIPlayerManager {
     }
 
     private record OwnerPlacement(Vec3 position, String kind) {
+    }
+
+    /** Complete movable state needed to make owner-adjacent placement transactional. */
+    private record CompanionLocation(ServerLevel world, Vec3 position, float yaw, float pitch,
+                                     float headYaw, float bodyYaw) {
+        private static CompanionLocation capture(AIPlayerEntity bot) {
+            return new CompanionLocation(bot.level(), bot.position(), bot.getYRot(), bot.getXRot(),
+                    bot.getYHeadRot(), bot.yBodyRot);
+        }
     }
 }

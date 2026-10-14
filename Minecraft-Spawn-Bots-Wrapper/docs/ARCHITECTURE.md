@@ -247,7 +247,7 @@ PvP BOT's own bot tick (`mc.LateTickPhase`) so that its steering is the last inp
 The state machine per inhabitant is IDLE -> CHASE -> PURSUE -> SEARCH -> RETURN -> IDLE; a CHASE carries a CONFIRMED flag
 (true only after the reaction time, false on the first unseen tick, restarted by every re-sighting); see the README for the
 rules. Time, not distance, is what noticing is made of (`Perception` + `ExposureTracker`, shared with Minecraft-AI through
-`docs/perception/vectors.json`, one continuous formula in seconds); the only hard-coded distance rule is the 64 block engage
+`docs/perception/vectors.json`, one continuous formula in seconds); the only hard-coded distance rule is the 16 block acquisition
 limit (`AggroController.ENGAGE_LIMIT`). The hunter acts only on what it perceives (no magic): sight, the last known position,
 hearing and the direction a blow came from.
 

@@ -90,6 +90,67 @@ class ObservedReachTest {
     }
 
     @Test
+    void reprovenEndpointConflictIsInconclusiveWhileStrictSearchStaysUnreachable() {
+        ObservedOccupancy occ = new ObservedOccupancy(0, 0, 0);
+        BlockPos from = new BlockPos(0, 0, 0);
+        BlockPos to = new BlockPos(5, 0, 0);
+        // Model a stale sweep cell that conflicts with a separate current-world proof of the target stand.
+        occ.markSolid(to);
+
+        assertEquals(Status.UNREACHABLE, ObservedReach.search(occ, from, to).status());
+        assertEquals(Status.INCONCLUSIVE,
+                ObservedReach.searchWithReprovenEndpoints(occ, from, to).status(),
+                "a stale endpoint must not become a positive reach result or a hard route rejection");
+    }
+
+    @Test
+    void reprovenEndpointsStillRejectAKnownInteriorWall() {
+        ObservedOccupancy occ = sealedInteriorWall();
+        BlockPos from = new BlockPos(0, 0, 0);
+        BlockPos to = new BlockPos(4, 0, 0);
+
+        assertEquals(Status.UNREACHABLE, ObservedReach.search(occ, from, to).status());
+        assertEquals(Status.UNREACHABLE, ObservedReach.searchWithReprovenEndpoints(occ, from, to).status());
+    }
+
+    @Test
+    void staleEndpointStillRejectsAKnownInteriorWall() {
+        ObservedOccupancy occ = sealedInteriorWall();
+        BlockPos from = new BlockPos(0, 0, 0);
+        BlockPos to = new BlockPos(4, 0, 0);
+        occ.markSolid(to); // stale only: the separate caller proof says this feet cell is live air.
+
+        assertEquals(Status.UNREACHABLE, ObservedReach.search(occ, from, to).status());
+        assertEquals(Status.UNREACHABLE, ObservedReach.searchWithReprovenEndpoints(occ, from, to).status());
+    }
+
+    @Test
+    void staleTargetHeadDoesNotCreateAFalseHardNegativeForAForcedDrop() {
+        ObservedOccupancy occ = new ObservedOccupancy(0, 0, 0);
+        // The only route is a two-block drop from (0,2,0) to (1,0,0). The target's head is part of
+        // the drop column, so merely accepting the target stand without overlaying its envelope is insufficient.
+        fenceTwoColumnShaft(occ, 2, 3, 0, 3);
+        BlockPos from = new BlockPos(0, 2, 0);
+        BlockPos to = new BlockPos(1, 0, 0);
+        occ.markSolid(to.above());
+
+        assertEquals(Status.UNREACHABLE, ObservedReach.search(occ, from, to).status());
+        assertEquals(Status.INCONCLUSIVE, ObservedReach.searchWithReprovenEndpoints(occ, from, to).status());
+    }
+
+    @Test
+    void contradictoryOverlappingEndpointEnvelopesPreserveStrictEvidence() {
+        ObservedOccupancy occ = new ObservedOccupancy(0, 0, 0);
+        BlockPos from = new BlockPos(0, 0, 0);
+        BlockPos to = new BlockPos(0, 2, 0);
+        // from's head and to's floor are the same cell, so both cannot be live stand proofs.
+        occ.markSolid(to);
+
+        assertEquals(Status.UNREACHABLE, ObservedReach.search(occ, from, to).status());
+        assertEquals(Status.UNREACHABLE, ObservedReach.searchWithReprovenEndpoints(occ, from, to).status());
+    }
+
+    @Test
     void startEnclosedBySolidGivesUnreachableQuickly() {
         ObservedOccupancy occ = new ObservedOccupancy(0, 0, 0);
         // Seal off every horizontal neighbour of the start at every height a step-up or a drop could reach;
@@ -276,6 +337,23 @@ class ObservedReachTest {
     private static void carveOpenColumn(ObservedOccupancy occ, int x, int z) {
         occ.set(x, 0, z, ObservedOccupancy.UNKNOWN);
         occ.set(x, 1, z, ObservedOccupancy.UNKNOWN);
+    }
+
+    /** A sealed one-cell corridor with a known wall at x=2, strictly between valid endpoints at x=0 and x=4. */
+    private static ObservedOccupancy sealedInteriorWall() {
+        ObservedOccupancy occ = new ObservedOccupancy(0, 0, 0);
+        for (int x = -1; x <= 5; x++) {
+            for (int z = -1; z <= 1; z++) {
+                for (int y = -4; y <= 4; y++) {
+                    occ.markSolid(x, y, z);
+                }
+            }
+        }
+        for (int x : new int[]{0, 1, 3, 4}) {
+            occ.markAir(x, 0, 0);
+            occ.markAir(x, 1, 0);
+        }
+        return occ;
     }
 
     @Test

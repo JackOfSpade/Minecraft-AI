@@ -14,6 +14,7 @@ import baritone.pathing.calc.AStarPathFinder;
 import baritone.pathing.calc.AbstractNodeCostSearch;
 import baritone.pathing.movement.CalculationContext;
 import baritone.utils.pathing.Favoring;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import java.util.List;
@@ -95,8 +96,15 @@ public final class BaritonePlanner {
             throw new IllegalStateException("BaritonePlanner.plan must be called on the server thread");
         }
         AIPlayerEntity bot = (AIPlayerEntity) ctx.player();
-        BaritoneSettings.applyNavLimits(bot);
+        MinecraftAiConfig.Nav candidateNav = MinecraftAiConfig.get().nav();
+        return BaritoneSettings.withCandidateNavCapabilities(bot, candidateNav,
+                () -> planWithCandidateContext(baritone, goal, primaryTimeoutMs, failureTimeoutMs, ctx, bot));
+    }
 
+    /** Builds one immutable planner context while the caller's candidate is visible only on this server thread. */
+    private static CompletableFuture<Plan> planWithCandidateContext(IBaritone baritone, Goal goal,
+                                                                      long primaryTimeoutMs, long failureTimeoutMs,
+                                                                      IPlayerContext ctx, AIPlayerEntity bot) {
         CalculationContext calc = new CalculationContext(baritone, true);
         BetterBlockPos start = ctx.playerFeet();
         Goal searched = goal;
@@ -153,10 +161,28 @@ public final class BaritonePlanner {
      * Does not touch {@link #IN_FLIGHT} (nothing else can run for the bot while this call holds the server thread).
      */
     public static Plan planNow(IBaritone baritone, Goal goal, long primaryTimeoutMs, long failureTimeoutMs) {
+        return planNow(baritone, goal, primaryTimeoutMs, failureTimeoutMs, MinecraftAiConfig.get().nav());
+    }
+
+    /**
+     * Runs an admission search with a caller-sampled, uncommitted capability candidate. The
+     * candidate is visible only while this server thread builds and evaluates its context; a
+     * route commits it after the search and goal hand-off have both succeeded.
+     */
+    static Plan planNow(IBaritone baritone, Goal goal, long primaryTimeoutMs, long failureTimeoutMs,
+                        MinecraftAiConfig.Nav candidateNav) {
         IPlayerContext ctx = baritone.getPlayerContext();
         if (!ctx.minecraft().isSameThread()) {
             throw new IllegalStateException("BaritonePlanner.planNow must be called on the server thread");
         }
+        AIPlayerEntity bot = (AIPlayerEntity) ctx.player();
+        return BaritoneSettings.withCandidateNavCapabilities(bot, candidateNav,
+                () -> planNowWithCandidateContext(baritone, goal, primaryTimeoutMs, failureTimeoutMs, ctx));
+    }
+
+    private static Plan planNowWithCandidateContext(IBaritone baritone, Goal goal,
+                                                     long primaryTimeoutMs, long failureTimeoutMs,
+                                                     IPlayerContext ctx) {
         CalculationContext calc = new CalculationContext(baritone, true);
         BetterBlockPos start = ctx.playerFeet();
         AbstractNodeCostSearch finder = new AStarPathFinder(start, start.x, start.y, start.z, goal,

@@ -81,14 +81,10 @@ public final class AutoSprintController {
     /** Called at the beginning of each world tick, before the world's players are ticked. */
     public void beforeWorldTick(ServerLevel level) {
         for (Entry entry : entries.values().toArray(Entry[]::new)) {
-            if (entry.level != level) {
+            if (discardIfInactive(entry)) {
                 continue;
             }
-            ServerPlayer player = entry.player;
-            if (!player.isAlive() || player.isRemoved() || player.level() != level
-                    || !ServerPlayNetworking.canSend(player, AutoSprintControlS2C.ID)) {
-                entries.remove(player.getUUID());
-                destroy(entry, true);
+            if (entry.level != level) {
                 continue;
             }
             try {
@@ -97,8 +93,9 @@ public final class AutoSprintController {
                 entry.baritone.getGameEventHandler().onTick(nextTick(EventState.PRE));
             } catch (Throwable exception) {
                 rethrowFatal(exception);
-                entries.remove(player.getUUID());
-                destroy(entry, true);
+                if (entries.remove(entry.player.getUUID(), entry)) {
+                    destroy(entry, true);
+                }
             }
         }
     }
@@ -106,15 +103,19 @@ public final class AutoSprintController {
     /** Called at the end of each world tick, after the client-supplied player movement has been processed. */
     public void afterWorldTick(ServerLevel level) {
         for (Entry entry : entries.values().toArray(Entry[]::new)) {
-            if (entry.level != level || !entries.containsKey(entry.player.getUUID())) {
+            if (discardIfInactive(entry)) {
+                continue;
+            }
+            if (entry.level != level) {
                 continue;
             }
             try {
                 sendSteeringFrame(entry);
             } catch (Throwable exception) {
                 rethrowFatal(exception);
-                entries.remove(entry.player.getUUID());
-                destroy(entry, true);
+                if (entries.remove(entry.player.getUUID(), entry)) {
+                    destroy(entry, true);
+                }
             }
         }
     }
@@ -125,6 +126,41 @@ public final class AutoSprintController {
         if (entry != null) {
             destroy(entry, false);
         }
+    }
+
+    /** Stops steering immediately after a portal, command, or respawn world transfer. */
+    public void onWorldChange(ServerPlayer player) {
+        Entry entry = entries.remove(player.getUUID());
+        if (entry != null) {
+            // A Fabric respawn transfer may supply a fresh destination player. The old entry
+            // cannot necessarily send a packet anymore, so always restore input through the
+            // player passed by the transfer event.
+            destroy(entry, false);
+            sendStop(player);
+        }
+    }
+
+    /**
+     * Stops input forwarding as soon as its player is no longer the player/world the Baritone
+     * instance was created for. This is checked before filtering a world-tick callback: a portal
+     * transfer can happen between a world's start and end callbacks, and sending even one more
+     * frame at that point can leave the client holding stale keys or free-look in its new world.
+     */
+    private boolean discardIfInactive(Entry entry) {
+        ServerPlayer player = entry.player;
+        // The iteration is a snapshot. An event handler can remove or replace this entry before
+        // its turn, in which case the snapshot must never emit a frame for the retired route.
+        if (entries.get(player.getUUID()) != entry) {
+            return true;
+        }
+        if (player.isAlive() && !player.isRemoved() && player.level() == entry.level
+                && ServerPlayNetworking.canSend(player, AutoSprintControlS2C.ID)) {
+            return false;
+        }
+        if (entries.remove(player.getUUID(), entry)) {
+            destroy(entry, true);
+        }
+        return true;
     }
 
     /** Server lifecycle cleanup. */

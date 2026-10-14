@@ -10,6 +10,7 @@ import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import io.github.zoyluo.minecraftai.pathfinding.DangerCheck;
 import io.github.zoyluo.minecraftai.pathfinding.Standability;
 import java.util.Comparator;
@@ -41,6 +42,7 @@ import net.minecraft.world.entity.monster.creaking.Creaking;
 import net.minecraft.world.entity.monster.piglin.Piglin;
 import net.minecraft.world.entity.monster.piglin.PiglinAi;
 import net.minecraft.world.entity.monster.spider.Spider;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
@@ -59,6 +61,8 @@ public final class CombatCore {
     /** Creepers can erase a zero-death mission before ordinary melee pressure is re-entered. */
     private static final double CREEPER_PRESSURE_RANGE = 16.0D;
     private static final double RANGED_HOSTILE_PRESSURE_RANGE = 20.0D;
+    /** Matches vanilla {@code LivingEntity.hasLineOfSight}: combat never queries a remote eye ray. */
+    private static final double MAX_COLLIDER_LINE_OF_SIGHT = 128.0D;
     /** How long a mob that hurt the bot (or its owner) stays a known aggressor: 10 seconds. */
     private static final int HURT_MEMORY_TICKS = 200;
 
@@ -387,12 +391,96 @@ public final class CombatCore {
      * to a pose from which the prey can be struck.
      */
     public static boolean hasLineOfSightFrom(AIPlayerEntity bot, Vec3 eye, LivingEntity mob) {
+        if (bot == null || eye == null || mob == null || mob.level() != bot.level()) {
+            return false;
+        }
+        Vec3 targetEye = mob.getEyePosition();
+        // Level.clip reads block states as it walks the ray.  It must never be allowed to turn a
+        // marked foreign player in a remote/unloaded column into a synchronous chunk request on
+        // the server thread (HostileBotLedger asks this before narrowing its player candidates).
+        // The guard mirrors the exact block traversal Level.clip uses, checks every crossed
+        // chunk without reading a block state, and gives up past vanilla's bounded sight range.
+        if (!colliderRayOnlyUsesLoadedChunks(eye, targetEye, bot.level().getChunkSource()::hasChunk)) {
+            return false;
+        }
         HitResult hit = bot.level().clip(new ClipContext(
-                eye, mob.getEyePosition(),
+                eye, targetEye,
                 ClipContext.Block.COLLIDER,
                 ClipContext.Fluid.NONE,
                 bot));
         return hit.getType() == HitResult.Type.MISS;
+    }
+
+    /** A live chunk-presence query used to prove a collider ray cannot cause a chunk load. */
+    @FunctionalInterface
+    interface ChunkAvailability {
+        boolean hasChunk(int chunkX, int chunkZ);
+    }
+
+    /**
+     * Returns true only when every voxel a bounded collider ray can read belongs to an already
+     * loaded chunk. It deliberately uses {@link BlockGetter#traverseBlocks}, the same traversal
+     * {@code Level.clip} performs before asking the level for each block state. Start and endpoint
+     * columns are checked directly as well, including exact block-boundary endpoints.
+     *
+     * <p>Keep this package-visible and pure: it lets the regression test exercise intermediate
+     * holes and boundary endpoints without constructing a server world. A ray longer than
+     * {@link #MAX_COLLIDER_LINE_OF_SIGHT}, malformed coordinates, or a traversal that cannot
+     * visit its origin is unknown and therefore rejected.</p>
+     */
+    static boolean colliderRayOnlyUsesLoadedChunks(Vec3 start, Vec3 end, ChunkAvailability chunks) {
+        if (start == null || end == null || chunks == null || !isFinite(start) || !isFinite(end)) {
+            return false;
+        }
+        double dx = end.x - start.x;
+        double dy = end.y - start.y;
+        double dz = end.z - start.z;
+        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (!Double.isFinite(distance) || distance > MAX_COLLIDER_LINE_OF_SIGHT) {
+            return false;
+        }
+        LoadedChunkRay ray = new LoadedChunkRay(chunks);
+        if (!ray.visit(BlockPos.containing(start)) || !ray.visit(BlockPos.containing(end))) {
+            return false;
+        }
+        BlockGetter.traverseBlocks(start, end, ray,
+                (path, cell) -> path.visit(cell) ? null : Boolean.FALSE,
+                ignored -> null);
+        return ray.allLoaded();
+    }
+
+    private static boolean isFinite(Vec3 point) {
+        return Double.isFinite(point.x) && Double.isFinite(point.y) && Double.isFinite(point.z);
+    }
+
+    /** Deduplicates consecutive block cells from one monotonic line without ever loading a chunk. */
+    private static final class LoadedChunkRay {
+        private final ChunkAvailability chunks;
+        private boolean hasLastChunk;
+        private int lastChunkX;
+        private int lastChunkZ;
+        private boolean allLoaded = true;
+
+        private LoadedChunkRay(ChunkAvailability chunks) {
+            this.chunks = chunks;
+        }
+
+        private boolean visit(BlockPos cell) {
+            int chunkX = cell.getX() >> 4;
+            int chunkZ = cell.getZ() >> 4;
+            if (hasLastChunk && lastChunkX == chunkX && lastChunkZ == chunkZ) {
+                return allLoaded;
+            }
+            hasLastChunk = true;
+            lastChunkX = chunkX;
+            lastChunkZ = chunkZ;
+            allLoaded = chunks.hasChunk(chunkX, chunkZ);
+            return allLoaded;
+        }
+
+        private boolean allLoaded() {
+            return hasLastChunk && allLoaded;
+        }
     }
 
     /**
@@ -489,13 +577,26 @@ public final class CombatCore {
      * opposite direction under the same test, else no strafe at all.
      */
     public static float safeStrafeInput(AIPlayerEntity bot, float desired) {
+        return safeStrafeInput(bot, desired, null);
+    }
+
+    /**
+     * {@link #safeStrafeInput(AIPlayerEntity, float)} with an optional local-site boundary. Both
+     * projected feet cells (including a legal one-block step down) and the current body must stay
+     * inside it before raw input can be written.
+     */
+    public static float safeStrafeInput(AIPlayerEntity bot, float desired,
+                                        NavRoute.MovementBoundary movementBoundary) {
         if (desired == 0.0F) {
             return 0.0F;
         }
-        if (canStrafeToward(bot, desired)) {
+        if (!allowsMovementFeet(movementBoundary, bot.blockPosition())) {
+            return 0.0F;
+        }
+        if (canStrafeToward(bot, desired, movementBoundary)) {
             return desired;
         }
-        return canStrafeToward(bot, -desired) ? -desired : 0.0F;
+        return canStrafeToward(bot, -desired, movementBoundary) ? -desired : 0.0F;
     }
 
     // ------------------------------------------------------------------ walked one-cell steps
@@ -542,16 +643,20 @@ public final class CombatCore {
         private final BlockPos cell;
         private final boolean keepAim;
         private final boolean sprint;
+        /** Optional feet-level boundary shared with a constrained Baritone combat route. */
+        private final NavRoute.MovementBoundary movementBoundary;
         private int ticks;
         /** Timeout budget spent: {@link #STEP_FULL_TICK_COST} per full-speed tick, 1 per item-use-slowed tick. */
         private int budgetSpent;
         private Vec3 lastPosition;
         private String failure;
 
-        private InputStep(BlockPos cell, boolean keepAim, boolean sprint) {
+        private InputStep(BlockPos cell, boolean keepAim, boolean sprint,
+                          NavRoute.MovementBoundary movementBoundary) {
             this.cell = cell.immutable();
             this.keepAim = keepAim;
             this.sprint = sprint;
+            this.movementBoundary = movementBoundary;
         }
 
         public BlockPos cell() {
@@ -576,7 +681,17 @@ public final class CombatCore {
      * @param sprint  sprint while walking (never at six food points or fewer, never while using an item)
      */
     public static InputStep beginStepByInput(BlockPos cell, boolean keepAim, boolean sprint) {
-        return new InputStep(cell, keepAim, sprint);
+        return beginStepByInput(cell, keepAim, sprint, null);
+    }
+
+    /**
+     * Starts an adjacent input-driven step that cannot leave {@code movementBoundary}. The same
+     * object is rechecked on every tick, so a knockback or a stale staged cover step releases its
+     * inputs before it can continue outside the local site.
+     */
+    public static InputStep beginStepByInput(BlockPos cell, boolean keepAim, boolean sprint,
+                                             NavRoute.MovementBoundary movementBoundary) {
+        return new InputStep(cell, keepAim, sprint, movementBoundary);
     }
 
     /**
@@ -601,6 +716,10 @@ public final class CombatCore {
 
         BlockPos cell = step.cell;
         BlockPos here = bot.blockPosition();
+        if (!allowsMovementFeet(step.movementBoundary, here)
+                || !allowsMovementFeet(step.movementBoundary, cell)) {
+            return failStep(bot, step, "movement_boundary");
+        }
         if (step.ticks == 1) {
             if (here.getY() != cell.getY()
                     || Math.abs(here.getX() - cell.getX()) > 1
@@ -694,7 +813,8 @@ public final class CombatCore {
         return Standability.isStandableFresh(level, cell) ? null : "no_landing";
     }
 
-    private static boolean canStrafeToward(AIPlayerEntity bot, float input) {
+    private static boolean canStrafeToward(AIPlayerEntity bot, float input,
+                                           NavRoute.MovementBoundary movementBoundary) {
         double yaw = Math.toRadians(bot.getYRot());
         double sign = Math.signum(input);
         double lateralX = Math.cos(yaw) * sign;
@@ -702,14 +822,18 @@ public final class CombatCore {
         for (double reach : new double[]{0.9D, 1.6D}) {
             BlockPos cell = BlockPos.containing(
                     bot.getX() + lateralX * reach, bot.getY(), bot.getZ() + lateralZ * reach);
-            if (!isSafeStrafeCell(bot.level(), cell)) {
+            if (!isSafeStrafeCell(bot.level(), cell, movementBoundary)) {
                 return false;
             }
         }
         return true;
     }
 
-    private static boolean isSafeStrafeCell(ServerLevel level, BlockPos feet) {
+    private static boolean isSafeStrafeCell(ServerLevel level, BlockPos feet,
+                                            NavRoute.MovementBoundary movementBoundary) {
+        if (!allowsMovementFeet(movementBoundary, feet)) {
+            return false;
+        }
         if (DangerCheck.scan(level, feet) != null) {
             return false;
         }
@@ -718,6 +842,11 @@ public final class CombatCore {
         }
         // A one-block step down is still a safe footing; a longer drop is a ledge.
         BlockPos lower = feet.below();
-        return DangerCheck.scan(level, lower) == null && Standability.isStandableFresh(level, lower);
+        return allowsMovementFeet(movementBoundary, lower)
+                && DangerCheck.scan(level, lower) == null && Standability.isStandableFresh(level, lower);
+    }
+
+    private static boolean allowsMovementFeet(NavRoute.MovementBoundary movementBoundary, BlockPos feet) {
+        return movementBoundary == null || movementBoundary.allowsFeet(feet);
     }
 }

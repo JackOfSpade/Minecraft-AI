@@ -68,16 +68,19 @@ final class BaritoneNavigatorMappingTest {
                 "goal resolution must not turn every water-capable route into an exact water goal");
 
         String fence = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/ObservedNavigationFence.java"));
-        String admit = method(fence, "public static Capture admit(");
+        String admit = candidateAdmission(fence);
         assertTrue(admit.contains("boolean exactWaterGoal = route.options().exactWaterGoal()")
                         && admit.contains("if (exactWaterGoal)"),
                 "only dedicated exact-water goals may use water-cell admission instead of dry-stance admission");
 
         String context = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/ServerPlayerContext.java"));
         String allowed = method(context, "private boolean navigationStateAllowed(BlockState state) {");
-        assertTrue(allowed.contains("!state.getFluidState().is(FluidTags.LAVA)")
-                        && allowed.contains("waterAllowed || !state.getFluidState().is(FluidTags.WATER)"),
-                "water permission must never make a lava cell navigable");
+        String capturedAllowed = method(context,
+                "private static boolean navigationStateAllowed(BlockState state, boolean allowWater) {");
+        assertTrue(allowed.contains("return navigationStateAllowed(state, effectiveWaterAllowed());")
+                        && capturedAllowed.contains("!state.getFluidState().is(FluidTags.LAVA)")
+                        && capturedAllowed.contains("allowWater || !state.getFluidState().is(FluidTags.WATER)"),
+                "the active or candidate route's water permission must never make a lava cell navigable");
 
     }
 
@@ -97,7 +100,7 @@ final class BaritoneNavigatorMappingTest {
     @Test
     void nearAdmissionRequiresACurrentlyVisibleTargetButRunAwayRemainsDirectionOnly() throws IOException {
         String fence = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/ObservedNavigationFence.java"));
-        String admit = method(fence, "public static Capture admit(");
+        String admit = candidateAdmission(fence);
         int near = admit.indexOf("if (route.shape() == NavRoute.Shape.NEAR)");
         int liveTargetGate = admit.indexOf("if (!liveTarget)", near);
         int pursuit = admit.indexOf("else if (route.shape() == NavRoute.Shape.DIRECTIONAL_PURSUIT)", near);
@@ -140,7 +143,7 @@ final class BaritoneNavigatorMappingTest {
     @Test
     void waterTraversalUsesOnlyFluidTransparentPlayerViewsForItsVisibleShoreStance() throws IOException {
         String fence = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/ObservedNavigationFence.java"));
-        String admit = method(fence, "public static Capture admit(");
+        String admit = candidateAdmission(fence);
         assertTrue(admit.contains("observeStandingEnvelope(bot, route.target(), waterTraversal, observed, tick)"),
                 "a route allowed to swim must prove a visible dry shore through water, rather than treating water as an opaque wall");
 
@@ -172,16 +175,23 @@ final class BaritoneNavigatorMappingTest {
         assertTrue(corridors.contains("if (from.getY() != to.getY())")
                         && corridors.contains("observeVisibleElevationColumns(bot, from, to, throughFluids, observed, tick)")
                         && corridors.contains("if (to.getY() < from.getY())")
-                        && corridors.contains("observeVisibleDescentColumn(bot, from, to, throughFluids, observed, tick)"),
+                        && corridors.contains("observeVisibleDescentColumn(bot, from, to, throughFluids, observed, corridorHalfWidth, tick)"),
                 "elevation and descent evidence must be requested only for the matching observed route shape");
-        assertTrue(corridors.contains("int halfWidth = corridorHalfWidth()")
-                        && corridors.contains("strip <= halfWidth"),
-                "the ray-proven corridor must use the current capability-scoped lateral envelope");
-        String corridorWidth = method(fence, "private static int corridorHalfWidth()");
-        assertTrue(corridorWidth.contains("mobAvoidanceEnabled()")
+        assertTrue(corridors.contains("int corridorHalfWidth")
+                        && corridors.contains("strip <= corridorHalfWidth"),
+                "the ray-proven corridor must use the explicit capability-scoped lateral envelope");
+        String candidateCorridorWidth = method(fence,
+                "private static int corridorHalfWidth(MinecraftAiConfig.BaritoneCaps caps)");
+        assertTrue(candidateCorridorWidth.contains("return corridorHalfWidth(caps.mobAvoidanceEnabled())"),
+                "a candidate route must size its proof from its own uncommitted capability set");
+        String activeCorridorWidth = method(fence, "private static int corridorHalfWidth(AIPlayerEntity bot)");
+        assertTrue(activeCorridorWidth.contains("return corridorHalfWidth(BaritoneSettings.mobAvoidanceEnabled(bot))"),
+                "an active route refresh must retain that bot's admitted avoidance snapshot");
+        String corridorWidth = method(fence, "private static int corridorHalfWidth(boolean avoidanceEnabled)");
+        assertTrue(corridorWidth.contains("avoidanceEnabled")
                         && corridorWidth.contains("BaritoneSettings.MOB_AVOIDANCE_RADIUS")
                         && corridorWidth.contains("BASE_CORRIDOR_HALF_WIDTH"),
-                "a seen hostile receives a full avoidance-radius detour only while the config switch is on");
+                "a seen hostile receives a full avoidance-radius detour only while the route switch is on");
 
         String elevation = method(fence, "private static void observeVisibleElevationColumns(");
         assertTrue(elevation.contains("from.getX(), from.getZ()")
@@ -190,11 +200,13 @@ final class BaritoneNavigatorMappingTest {
                         && elevation.contains("observeVisibleColumn(bot"),
                 "climbing must prove both visible endpoint columns rather than interpolating hidden cells");
 
-        String admission = method(fence, "public static Capture admit(");
-        assertTrue(admission.contains("boolean climbableGoal = isObservedClimbable(candidate, route.target())")
+        String admission = candidateAdmission(fence);
+        assertTrue(admission.contains("Objects.requireNonNull(candidateCaps, \"candidateCaps\")")
+                        && admission.contains("int corridorHalfWidth = corridorHalfWidth(candidateCaps)")
+                        && admission.contains("boolean climbableGoal = isObservedClimbable(candidate, route.target())")
                         && admission.contains("climbableGoal ? route.target().immutable()")
                         && admission.contains("observeVisibleCorridors(bot, feet, stance"),
-                "a ray-proven vine/ladder goal must remain its own Baritone endpoint while the route corridor is still proven");
+                "a candidate route must preserve its own caps while a ray-proven vine/ladder goal remains its own Baritone endpoint");
         String endpoint = method(fence, "public BlockPos nearestObservedStance(");
         assertTrue(endpoint.contains("isObservedClimbable(this, target)") && endpoint.contains("target.immutable()"),
                 "goal resolution must retain an observed climbable endpoint instead of snapping it to a dry neighbouring floor");
@@ -335,8 +347,14 @@ final class BaritoneNavigatorMappingTest {
                         && state.contains("BlockState state = ownerSnapshot.stateAt(x, y, z);")
                         && state.contains("state == null || !navigationStateAllowed(state)"),
                 "an allowed direct cell is paired with a snapshot state; a dry water or race/miss is virtual bedrock, never cache fallback");
-        assertTrue(context.contains("ownerFollowSnapshot = null;"),
-                "the direct snapshot is cleared at both route and lifecycle boundaries");
+        String installBoundary = method(context,
+                "public void setObservationFence(ObservedNavigationFence fence, boolean ownerFollow,");
+        String clearFence = method(context, "public void clearObservationFence() {");
+        String clearMemory = method(context, "public void clearObservationMemory() {");
+        assertTrue(installBoundary.contains("navigationBoundary = navigationBoundary(fence, ownerFollow, movementBoundary);")
+                        && clearFence.contains("navigationBoundary = NavigationBoundary.empty();")
+                        && clearMemory.contains("navigationBoundary = NavigationBoundary.empty();"),
+                "the owner snapshot is atomically replaced or cleared with its route boundary at both lifecycle boundaries");
 
         String snapshot = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/LoadedChunkSnapshot.java"));
         String full = method(snapshot, "public boolean hasFullChunk(int chunkX, int chunkZ) {");
@@ -403,7 +421,7 @@ final class BaritoneNavigatorMappingTest {
     @Test
     void visiblePillarAndAsyncReplansKeepTheirNarrowSafetyProofs() throws IOException {
         String fence = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/ObservedNavigationFence.java"));
-        String admit = method(fence, "public static Capture admit(");
+        String admit = candidateAdmission(fence);
         assertTrue(admit.contains("route.options().allowPlace() && liveTarget && route.returnAnchor() == null")
                         && admit.contains("observePillarColumn") && admit.contains("isObservedPillarColumn"),
                 "a pillar goal needs a live target, no return contract, and an explicitly proven vertical column");
@@ -438,8 +456,9 @@ final class BaritoneNavigatorMappingTest {
         String observedHostiles = method(navigator, "private static int observedHostileCount(");
         assertTrue(observedHostiles.contains("baritone.getPlayerContext().entities()")
                         && observedHostiles.contains("entity instanceof Mob mob && mob instanceof Enemy && mob.isAlive()")
-                        && observedHostiles.contains("mobAvoidanceEnabled()"),
-                "the bounded retry may consider only the already perception-filtered hostile list while avoidance is enabled");
+                        && observedHostiles.contains("boolean mobAvoidanceEnabled")
+                        && observedHostiles.contains("if (!mobAvoidanceEnabled)"),
+                "the bounded retry may consider only the already perception-filtered hostile list while its candidate avoidance snapshot is enabled");
         assertFalse(observedHostiles.contains("getEntitiesOfClass") || observedHostiles.contains("level().get"),
                 "retry selection must not scan the live world for hostiles");
         String driver = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/BaritoneDriver.java"));
@@ -451,7 +470,7 @@ final class BaritoneNavigatorMappingTest {
     @Test
     void aPillarGoalProvesTheWalkToItsFootByRaysBeforeItAsksForThePathAndSaysWhichProofFailed() throws IOException {
         String fence = Files.readString(Path.of("src/main/java/io/github/zoyluo/minecraftai/baritone/ObservedNavigationFence.java"));
-        String admit = method(fence, "public static Capture admit(");
+        String admit = candidateAdmission(fence);
         int column = admit.indexOf("observePillarColumn(bot, feet, route.target(), observed, tick)");
         int corridors = admit.indexOf("observePillarWalk(bot, feet, pillarBase, observed, tick)", column);
         int frozen = admit.indexOf("freeze(dimension, route.minimumY(), generation, tick, observed)", corridors);
@@ -491,5 +510,10 @@ final class BaritoneNavigatorMappingTest {
             }
         }
         throw new AssertionError(signature + " must close");
+    }
+
+    /** The public compatibility overload delegates to the candidate-cap admission implementation. */
+    private static String candidateAdmission(String source) {
+        return method(source, "MinecraftAiConfig.BaritoneCaps candidateCaps)");
     }
 }

@@ -1,5 +1,6 @@
 package dev.spawnbotswrapper.inhabitants.config;
 
+import dev.spawnbotswrapper.inhabitants.combat.Perception;
 import dev.spawnbotswrapper.inhabitants.util.RangedDistances;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,7 +31,8 @@ class PvpbotSettingsConfigTest {
     @Test
     void theShippedDefaultsAreTheEngageLimitAndTheArcherRanges() {
         InhabitantsConfig.PvpbotSettings s = new InhabitantsConfig().pvpbotSettings;
-        assertEquals(16.0, s.maxTargetDistance, "PvP BOT only has to cover the 16 block engage limit");
+        assertEquals(16.0, Perception.ENGAGE_LIMIT, "the acquisition limit stays a deliberate 16-block policy");
+        assertEquals(Perception.ENGAGE_LIMIT, s.maxTargetDistance, "PvP BOT only has to cover the wrapper's acquisition limit");
         assertEquals(8.0, s.rangedMinRange);
         assertEquals(12.0, s.rangedOptimalRange);
         assertEquals(16.0, s.rangedMaxRange);

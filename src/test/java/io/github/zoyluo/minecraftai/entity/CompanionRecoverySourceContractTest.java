@@ -117,6 +117,44 @@ final class CompanionRecoverySourceContractTest {
     }
 
     @Test
+    void unverifiedOwnerPlacementRollsBackItsSpeculativeTeleport() throws IOException {
+        String manager = read("manager/AIPlayerManager.java");
+        int placement = manager.indexOf("private static Optional<OwnerPlacement> teleportCompanionBesideOwner");
+        assertTrue(placement >= 0, "owner placement must remain a dedicated transactional operation");
+        int rollback = manager.indexOf("private static boolean restoreCompanionLocation", placement);
+        assertTrue(rollback > placement, "owner placement must have a rollback helper");
+        String placementBody = manager.substring(placement, rollback);
+        assertTrue(placementBody.contains("CompanionLocation original = CompanionLocation.capture(bot);")
+                        && placementBody.contains("boolean ownerClientPairingBefore = ownerClientPairingPresent(bot, owner);")
+                        && placementBody.contains("boolean committed = false;"),
+                "owner placement must retain its complete pre-attempt location and owner-pairing state until it commits");
+        assertTrue(placementBody.contains("if (!committed) {")
+                        && placementBody.contains("restoreCompanionLocation(bot, original) && ownerClientPairingBefore")
+                        && placementBody.contains("restoreOwnerClientPairingAfterRollback(bot, owner);"),
+                "a failed candidate/pairing attempt must restore both the companion and its prior owner client pairing");
+        assertTrue(manager.contains("bot.teleportTo(original.world(),")
+                        && manager.contains("bot.setYRot(original.yaw());")
+                        && manager.contains("bot.setXRot(original.pitch());")
+                        && manager.contains("bot.setYHeadRot(original.headYaw());")
+                        && manager.contains("bot.setYBodyRot(original.bodyYaw());"),
+                "rollback must restore the original world, coordinates, and every body/look rotation");
+        assertTrue(manager.contains("companion_owner_placement_rollback_failed"),
+                "a rare vanilla rollback failure must be visible rather than silently claiming a failed recall");
+        int pairingRollback = manager.indexOf("private static void restoreOwnerClientPairingAfterRollback");
+        int pairingTracker = manager.indexOf("private static ChunkMapTrackedEntityPairingInvokerMixin ownerClientPairingTracker",
+                pairingRollback);
+        assertTrue(pairingRollback >= 0 && pairingTracker > pairingRollback,
+                "rollback must retain a dedicated owner-pairing restoration path");
+        String pairingRollbackBody = manager.substring(pairingRollback, pairingTracker);
+        assertTrue(pairingRollbackBody.contains("pairing.minecraftai$getSeenBy().contains(owner.connection)")
+                        && pairingRollbackBody.contains("pairing.minecraftai$getSeenBy().add(owner.connection)")
+                        && pairingRollbackBody.contains("pairing.minecraftai$getServerEntity().addPairing(owner)"),
+                "a pre-existing owner pairing must be replayed with the native tracker after rollback");
+        assertTrue(pairingRollbackBody.contains("companion_owner_pairing_rollback_failed"),
+                "an unrecoverable pairing rollback must be observable");
+    }
+
+    @Test
     void ownerDeathKeepsSafetyCombatThenHoldsUntilANewDirection() throws IOException {
         String lifecycle = read("runtime/RuntimeLifecycleCoordinator.java");
         String danger = read("task/DangerWatcher.java");

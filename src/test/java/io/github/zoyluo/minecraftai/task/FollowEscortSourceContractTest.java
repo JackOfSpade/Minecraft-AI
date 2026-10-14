@@ -46,7 +46,8 @@ final class FollowEscortSourceContractTest {
         assertTrue(escort.contains("CombatCore.canStrikeNow(bot, entity)") && escort.contains("bot.isUsingItem()"));
         assertTrue(escort.contains("CombatCore.hostileTo(bot, entity)")
                         && escort.contains("!CombatCore.isMeleeForbiddenThreat(entity)")
-                        && escort.contains("ObservableWorldQuery.canNoticeCreature(bot, entity)"),
+                        && escort.contains("ObservableWorldQuery.canNoticeCreature(bot, entity)")
+                        && escort.contains("CombatCore.hasLineOfSight(bot, entity)"),
                 "the candidates are the bot's own defence targets it has noticed, never a melee-forbidden threat");
         assertFalse(escort.contains("stopMovement") || escort.contains("stopNavigation") || escort.contains("startPathTo")
                         || escort.contains("startApproachTo") || escort.contains("startWalkTo"),
@@ -77,6 +78,26 @@ final class FollowEscortSourceContractTest {
     void anEngagedEscortKeepsTheFollowTaskCritical() throws IOException {
         String manager = read("task/TaskManager.java");
         assertTrue(manager.contains("task instanceof FollowTask follow && follow.escortEngaged()"));
+    }
+
+    @Test
+    void escortOwnershipRequiresThatTheLandEscortActuallyRanThisTick() throws IOException {
+        String follow = read("task/FollowTask.java");
+        int proof = follow.indexOf("boolean ranLandEscortThisTick(AIPlayerEntity bot)");
+        int tick = follow.indexOf("protected void onTick(AIPlayerEntity bot)");
+        int escort = follow.indexOf("escort.tick(bot, target);", tick);
+        int stamp = follow.lastIndexOf("lastLandEscortTick = bot.level().getGameTime();", escort);
+        assertTrue(proof >= 0 && tick > proof && stamp > tick && escort > stamp,
+                "only the branch that reaches FollowEscort may mark same-tick escort ownership");
+        String proofBody = follow.substring(proof, follow.indexOf("\n    }", proof));
+        assertTrue(proofBody.contains("lastLandEscortTick == bot.level().getGameTime()"),
+                "a retained escort flag cannot survive a skipped follow tick");
+
+        String watcher = read("task/DangerWatcher.java");
+        int escortGate = watcher.indexOf("private static boolean isEscortFollow");
+        String gate = watcher.substring(escortGate, watcher.indexOf("\n    }", escortGate));
+        assertTrue(gate.contains("follow.ranLandEscortThisTick(bot)"),
+                "portal, water, boat, debt-repayment, and unresolved-target early returns must dispatch ordinary combat");
     }
 
     @Test
@@ -122,19 +143,21 @@ final class FollowEscortSourceContractTest {
     }
 
     @Test
-    void theFollowEscapeCheckRunsOnlyForAThreatThatCouldActuallyBeAssigned() throws IOException {
+    void theFollowEscortGateIsComputedDuringSharedArbitrationAndReusedByBothHandoffs() throws IOException {
         String watcher = read("task/DangerWatcher.java");
+        int keep = watcher.indexOf("boolean followKeepsCurrentThreat = threat");
+        int bridge = watcher.indexOf("PvpBotCombatBrain.INSTANCE.available()", keep);
         int top = watcher.indexOf("Threat top = threat.get();");
         int branch = watcher.lastIndexOf("if (threat.isPresent()) {", top);
         int end = watcher.indexOf("        // Mitigation hardening", top);
-        assertTrue(branch >= 0 && end > top);
+        assertTrue(keep >= 0 && bridge > keep && branch > bridge && end > top);
         String dispatch = watcher.substring(branch, end);
         int severity = dispatch.indexOf("top.severity().ordinal()");
         int owner = dispatch.indexOf("shouldAssignThreatTask(bot, active, top)");
         int cooldown = dispatch.indexOf("canAssignThreatTask(server, bot, top)");
-        int followKeeps = dispatch.indexOf("followKeepsThreat(server, bot, active, top)");
+        int followKeeps = dispatch.indexOf("&& !followKeepsCurrentThreat");
         assertTrue(severity >= 0 && owner > severity && cooldown > owner && followKeeps > cooldown,
-                "follow escort logging and shelter probing run only after a medium-or-higher threat can dispatch");
+                "the shared escort gate is settled before the optional bridge and prevents the deterministic handoff from bypassing it");
     }
 
     private static String read(String relative) throws IOException {

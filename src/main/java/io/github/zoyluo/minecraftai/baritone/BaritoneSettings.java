@@ -6,6 +6,7 @@ import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.FallSafety;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
+import java.util.function.Supplier;
 
 /**
  * The fixed, global Baritone settings of this mod.
@@ -18,9 +19,9 @@ import io.github.zoyluo.minecraftai.log.BotLog;
  * <p>Two groups:</p>
  * <ul>
  *   <li>{@link #applyFixed()}: never changes at run time; applied once, before the first instance exists.</li>
- *   <li>{@link #applyNavLimits()}: derived from {@link MinecraftAiConfig} (the fall height our own navigation accepts), so
- *       it is re-applied whenever an instance is created or a plan is requested; a config reload takes effect at the next
- *       plan, never in the middle of one.</li>
+ *   <li>{@link #applyNavLimits()}: derived from a bot's capability snapshot (and its current safe fall height). A config
+ *       reload is captured at the next route or standalone plan, never in the middle of one; the snapshot is replayed before
+ *       each active Baritone tick because upstream keeps these fields globally.</li>
  * </ul>
  */
 public final class BaritoneSettings {
@@ -35,7 +36,7 @@ public final class BaritoneSettings {
         Settings settings = BaritoneAPI.getSettings();
 
         // -- Moves that are config switches (nav.baritone.*): parkour, parkour-place, parkour-ascend, the water-bucket fall, vines and
-        // mob avoidance. They are derived from the config at every plan request (applyNavLimits), not fixed here, so a hand-edited
+        // mob avoidance. They are captured at route/plan admission and replayed by applyNavLimits, not fixed here, so a hand-edited
         // baritone/settings.txt cannot turn them on behind the config's back. What is fixed here is what the config does not offer:
         // a mob spawner is never avoided (the spawner list of Baritone's avoidance comes from its world cache, which stays off below).
         settings.mobSpawnerAvoidanceCoefficient.value = 1.0D;
@@ -80,15 +81,78 @@ public final class BaritoneSettings {
         applyNavLimits(null);
     }
 
-    /** Applies fall limits for one bot; only a fall that cannot kill its current body is planned. */
+    /**
+     * Commits the current config's movement switches and conservative dry-fall ceiling to one
+     * accepted route. Candidate admissions use {@link #withCandidateNavCapabilities} instead,
+     * so they never overwrite a running route's immutable worker snapshot.
+     */
+    static ServerPlayerContext.NavigationLimits commitNavCapabilities(AIPlayerEntity bot) {
+        return commitNavCapabilities(bot, MinecraftAiConfig.get().nav());
+    }
+
+    /** Commits a caller-sampled config only after its route has been accepted. */
+    static ServerPlayerContext.NavigationLimits commitNavCapabilities(AIPlayerEntity bot, MinecraftAiConfig.Nav nav) {
+        if (bot == null) {
+            return null;
+        }
+        BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
+        return entry == null ? null
+                : entry.context.commitNavigationLimits(java.util.Objects.requireNonNull(nav, "nav"));
+    }
+
+    /** Restores the route snapshot if a goal hand-off throws after committing its candidate. */
+    static void restoreNavCapabilities(AIPlayerEntity bot, ServerPlayerContext.NavigationLimits previous) {
+        if (bot == null || previous == null) {
+            return;
+        }
+        BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
+        if (entry != null) {
+            entry.context.restoreNavigationLimits(previous);
+        }
+    }
+
+    /**
+     * Supplies an uncommitted config only to the server-thread calculation that is admitting it.
+     * The context's candidate is thread-local, so an existing route's worker can never pair its
+     * terrain snapshot with a replacement route's movement switches.
+     */
+    static <T> T withCandidateNavCapabilities(AIPlayerEntity bot, MinecraftAiConfig.Nav nav, Supplier<T> calculation) {
+        java.util.Objects.requireNonNull(calculation, "calculation");
+        if (bot == null) {
+            return calculation.get();
+        }
+        BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
+        return entry == null ? calculation.get()
+                : entry.context.withCandidateNavigationLimits(java.util.Objects.requireNonNull(nav, "nav"), calculation);
+    }
+
+    /** The existing route's switches, used when a re-goal must not alter that route's authority. */
+    static MinecraftAiConfig.BaritoneCaps activeNavigationCaps(AIPlayerEntity bot) {
+        MinecraftAiConfig.Nav nav = MinecraftAiConfig.get().nav();
+        if (bot == null) {
+            return nav.baritoneCaps();
+        }
+        BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
+        return entry == null ? nav.baritoneCaps() : entry.context.committedNavigationCaps();
+    }
+
+    /**
+     * Applies fall limits for one bot.
+     *
+     * <p>The configured dry-fall ceiling is a conservative policy limit, not merely a fallback
+     * for a damaged body. A dry fall is therefore planned only when it is no higher than both
+     * that configured ceiling and the current body's non-lethal height. A full-health bot must
+     * never turn a deliberately conservative {@code nav.maxSafeFall} into permission for a
+     * damaging drop.</p>
+     */
     public static void applyNavLimits(AIPlayerEntity bot) {
         Settings settings = BaritoneAPI.getSettings();
         MinecraftAiConfig.Nav nav = MinecraftAiConfig.get().nav();
-        MinecraftAiConfig.BaritoneCaps caps = nav.baritoneCaps();
-        int maxSafeFall = bot == null ? Math.max(1, nav.maxSafeFall()) : FallSafety.maxNonLethalFall(bot);
-        // Without a bucket this is the only fall limit that is consulted. For a bot it is
-        // recomputed from its current health before each planning context; the path fence still
-        // checks the exact body again before the movement begins.
+        MinecraftAiConfig.BaritoneCaps caps = navigationCaps(bot, nav);
+        int maxSafeFall = maxSafeDryFall(bot, nav);
+        // Without a bucket this is the only fall limit that is consulted. It is the minimum of
+        // the configured conservative ceiling and the current body's non-lethal height; the
+        // path fence checks the exact body again before the movement begins.
         settings.maxFallHeightNoWater.value = maxSafeFall;
         // With a water bucket in the hotbar (Baritone's cost model checks the bot's own inventory and refuses the Nether) a higher fall
         // is planned, and only then; without the switch the bucket limit is the same number, so it can never exceed what the mod
@@ -106,5 +170,49 @@ public final class BaritoneSettings {
         // Mob avoidance reads the mobs through IPlayerContext#entities(), which is the bot's observation-filtered list
         // (ServerPlayerContext#refreshEntities: hostile mobs it can see, nothing else), so an unseen mob is never avoided.
         settings.avoidance.value = caps.mobAvoidanceEnabled();
+    }
+
+    /** Whether this bot's admitted route permits the water-bucket fall movement. */
+    static boolean waterBucketFallEnabled(AIPlayerEntity bot) {
+        MinecraftAiConfig.Nav nav = MinecraftAiConfig.get().nav();
+        return navigationCaps(bot, nav).waterBucketFallEnabled();
+    }
+
+    /** Whether this bot's admitted route gathers hostile mobs for Baritone avoidance. */
+    static boolean mobAvoidanceEnabled(AIPlayerEntity bot) {
+        MinecraftAiConfig.Nav nav = MinecraftAiConfig.get().nav();
+        return navigationCaps(bot, nav).mobAvoidanceEnabled();
+    }
+
+    /**
+     * Largest dry fall this bot may deliberately plan: no larger than the configured policy
+     * ceiling and no larger than the bot's present unprotected survivability.
+     */
+    static int maxSafeDryFall(AIPlayerEntity bot) {
+        return maxSafeDryFall(bot, MinecraftAiConfig.get().nav());
+    }
+
+    private static int maxSafeDryFall(AIPlayerEntity bot, MinecraftAiConfig.Nav nav) {
+        int configuredSafeFall = configuredSafeFall(bot, nav);
+        return bot == null ? configuredSafeFall
+                : Math.min(configuredSafeFall, FallSafety.maxNonLethalFall(bot));
+    }
+
+    private static int configuredSafeFall(AIPlayerEntity bot, MinecraftAiConfig.Nav nav) {
+        int configuredSafeFall = Math.max(1, nav.maxSafeFall());
+        if (bot == null) {
+            return configuredSafeFall;
+        }
+        BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
+        return entry == null ? configuredSafeFall : entry.context.navigationMaxSafeFall();
+    }
+
+    /** Uses the route-bound values for a live bot; bootstrap and auto-sprint retain the current config. */
+    private static MinecraftAiConfig.BaritoneCaps navigationCaps(AIPlayerEntity bot, MinecraftAiConfig.Nav nav) {
+        if (bot == null) {
+            return nav.baritoneCaps();
+        }
+        BaritoneRegistry.Entry entry = BaritoneRegistry.INSTANCE.entry(bot.getUUID());
+        return entry == null ? nav.baritoneCaps() : entry.context.navigationCaps();
     }
 }

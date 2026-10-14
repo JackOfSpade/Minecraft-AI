@@ -17,6 +17,8 @@ public final class NavRouteRules {
     public static final String POLICY_REFUSED = "policy_refused";
     /** A memory-only target reached its saved stance but was not visibly re-proven. */
     public static final String OBSERVATION_LOST = "navigation_observation_lost";
+    /** The entity-level boundary sweep rejected a residual move before the bot's feet could leave its declared site. */
+    public static final String MOVEMENT_BOUNDARY_REFUSED = "navigation_movement_boundary_refused";
     /** Cancel reason of a route that a newer request replaced. */
     public static final String REPLACED = "replaced";
     /** Failure reason of a route that was running when Baritone was given up on; navigation has stopped. */
@@ -80,6 +82,7 @@ public final class NavRouteRules {
             case ARRIVED -> new Verdict(NavOutcome.Status.SUCCESS, "");
             case ENDED_SHORT -> new Verdict(NavOutcome.Status.FAILED, shortFailureReason(searchFailed));
             case OBSERVATION_LOST -> new Verdict(NavOutcome.Status.FAILED, OBSERVATION_LOST);
+            case MOVEMENT_BOUNDARY_REFUSED -> new Verdict(NavOutcome.Status.FAILED, MOVEMENT_BOUNDARY_REFUSED);
             case POLICY_REFUSED -> new Verdict(NavOutcome.Status.FAILED, POLICY_REFUSED);
             case RUNNING -> dryRouteWet
                     ? new Verdict(NavOutcome.Status.FAILED, ROUTE_ENTERED_WATER)

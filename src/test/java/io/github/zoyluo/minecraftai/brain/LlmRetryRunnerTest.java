@@ -8,8 +8,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -252,6 +255,39 @@ final class LlmRetryRunnerTest {
         time.advanceBy(Duration.ofMinutes(10).toMillis());
 
         assertEquals(List.of("answer"), answers);
+    }
+
+    @Test
+    void aStoppedWorkerCannotLeakARejectedRetryFromTheDelayedScheduler() {
+        AtomicBoolean workerRunning = new AtomicBoolean(true);
+        Executor shutdownAwareWorker = task -> {
+            if (!workerRunning.get()) {
+                throw new RejectedExecutionException("runtime_stopped");
+            }
+            task.run();
+        };
+        LlmRetryRunner shutdownRunner = new LlmRetryRunner(
+                shutdownAwareWorker, time, () -> time.nowMs, new LlmRetryPolicy(() -> 0.0D));
+        Script service = new Script(time, List.of(OVERLOADED), "answer");
+
+        shutdownRunner.run("Moss", service::call, wanted::get, answers::add, failures::add);
+        assertEquals(1, service.callTimes.size());
+        assertEquals(1, time.pending());
+
+        workerRunning.set(false); // Runtime shutdown races the delayed retry.
+        assertDoesNotThrow(() -> time.advanceBy(1_000));
+
+        assertEquals(1, service.callTimes.size(), "the stopped worker must not run another HTTP attempt");
+        assertTrue(answers.isEmpty());
+        assertTrue(failures.isEmpty(), "shutdown retires the callback destination with its worker");
+        assertEquals(0, time.pending());
+
+        Script neverStarted = new Script(time, List.of(), "never reached");
+        assertDoesNotThrow(() -> shutdownRunner.run(
+                "Moss", neverStarted::call, wanted::get, answers::add, failures::add));
+        assertTrue(neverStarted.callTimes.isEmpty(), "an initial submission must share the shutdown-safe dispatch");
+        assertTrue(answers.isEmpty());
+        assertTrue(failures.isEmpty(), "the shutdown race must not duplicate terminal callbacks");
     }
 
     @Test

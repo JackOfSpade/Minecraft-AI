@@ -16,10 +16,11 @@ read(observer O, subject S, heard?) -> SIGHT | HEARING | NONE   and the exposure
 Both run the golden vectors in [`perception/vectors.json`](perception/vectors.json) and must agree on every case
 (Minecraft-AI: `CreaturePerceptionTest`; wrapper: `PerceptionTest`).
 
-**Sight has no block limit inside the view cone.** The only hard-coded distance rule is the wrapper's *engage limit* of
-64 blocks: a bot never ENGAGES (acquires, chases, pursues) a target it sees and measures farther away than that. It is a
-constant of the hunter, not a parameter of the model, and it does not change what is seen: the reaction formula below
-simply carries on past 64 blocks. Minecraft-AI applies its own radius on top.
+**Sight has no block limit inside the view cone.** The only hard-coded distance rule is the wrapper's 16-block *acquisition
+limit*: a bot never starts an engagement with a target it sees and measures farther away than that. It is a constant of the
+hunter, not a parameter of the model, and it does not change what is seen: an engagement already begun inside the limit may
+continue while its target remains visible, and the reaction formula below simply carries on past 64 blocks. Minecraft-AI
+applies its own radius on top.
 
 ## Model
 
@@ -79,12 +80,12 @@ simply carries on past 64 blocks. Minecraft-AI applies its own radius on top.
   radius. `aggro.requireLineOfSight` stays the switch for occlusion.
 * The wrapper notices players and Minecraft-AI companions (all `ServerPlayer`s); mobs are not noticed by it.
 * A candidate is scanned every `aggro.scanIntervalTicks` (3) ticks, staggered across inhabitants, and every tick while its
-  exposure is in progress or a sound holds the bot's attention; candidates beyond the 64 block engage limit are never
+  exposure is in progress or a sound holds the bot's attention; candidates beyond the 16-block acquisition limit are never
   scanned (no rays).
 * A hit tells the victim where a blow came from, not who struck it: a melee hit by an adjacent player it sees starts a
   reaction (required seconds at that distance, angle factor 1, sneaking ignored); a projectile from an unseen shooter gives
   only the incoming direction (the reverse of the projectile's velocity at impact), which the bot turns to look along, and
-  the point found by tracing back along that line (first blocking block, or 64 blocks) is where it pursues.
+  the point found by tracing back along that line (first blocking block, or 16 blocks) is where it pursues.
 * The old range-based and tick-based keys (`acquireRange`, `leashRange`, `loseSightTicks`, `peripheralFactor`, `sneakFactor`,
   `reactionTicks`, `distanceReactionTicksPer32`, `frontHalfAngleDeg`, `hearWalk`, `hearSprint`, `hearCombat`,
   `combatNoiseTicks`) are ignored with one INFO line when an old config still carries them.
@@ -93,8 +94,8 @@ simply carries on past 64 blocks. Minecraft-AI applies its own radius on top.
 
 Companion bots are `AIPlayerEntity`s (real `ServerPlayer`s), so the same rules apply to what THEY notice: creatures (mobs,
 players, other bots), never objects. Sight has no engage limit here; the farthest a companion sees is its profile observation
-radius (`perception.radius`, 16 by default; the configured observation radius), because the 64 block engage limit
-is a PvP BOT rule. The 64 in the formula is only its slope.
+radius (`perception.radius`, 16 by default; the configured observation radius), because the wrapper's 16-block acquisition
+limit is a PvP BOT rule. The 64 in the formula is only its slope.
 
 * **State, not rays, at the call sites.** `CreatureSenses.tickBot` runs once per bot per server tick (`BotTickCoordinator`,
   before anything else): it reads every creature around the bot (the cheap distance and angle filters first, the eye ray and
@@ -146,7 +147,8 @@ is a PvP BOT rule. The 64 in the formula is only its slope.
   `sneakMultiplier` and `hearing.listenerRadius` (see OPERATING_PROFILES.md).
 * **Call sites.** `PerceptionCallSiteClassificationTest` lists every caller of `canNoticeCreature`, `canObserveEntity` and
   `hasLineOfSight` with its class: creature noticing (DangerWatcher threat scans, AggroSense, CombatCore target acquisition,
-  CombatTask, CreeperDefenseTask, EmergencyShelterTask, EvadeTask, FollowEscort, ProjectileThreat, QuietZone, SharedVision, ShieldGuard,
+  CombatTask, CreeperDefenseTask, EmergencyShelterTask, EvadeTask, FollowEscort (noticed creature plus the bot's collider line before
+  the in-place escort may swing), ProjectileThreat, QuietZone, SharedVision, ShieldGuard,
   HostileBotIntent, PerceptionCollector, DiagnosticLogger, Baritone mob avoidance, AmbientConversationCoordinator: a canned ambient line needs an addressee
   the speaker has noticed), objects and deliberate searches (kept
   omnidirectional: drops, boats, prey, the discovery task's deliberate sheep survey, breeding, milking, trading, the landmark evidence of the mining assist) and physical strike legality (kept).

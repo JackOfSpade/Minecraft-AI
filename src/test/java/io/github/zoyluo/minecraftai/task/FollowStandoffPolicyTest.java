@@ -18,4 +18,5 @@ final class FollowStandoffPolicyTest {
     void aFollowerThatWasNotHoldingMayStartItsFirstRouteImmediately() {
         assertTrue(FollowTask.shouldResumeStandoffHold(false, 4.0D));
     }
+
 }

@@ -15,8 +15,7 @@ import io.github.zoyluo.minecraftai.action.QuietZone;
  *   <li>Within {@value #CLOSE_GAP} blocks: SNEAK when the player has been sneaking for {@value #SNEAK_TICKS} ticks, else WALK.</li>
  *   <li>The player sneaks: SNEAK up to {@value #SNEAK_MIRROR_GAP} blocks; further out WALK, and SPRINT only from
  *       {@value #SNEAK_CATCH_UP_GAP} blocks and outside every quiet zone.</li>
- *   <li>The player sprints (synced flag, or {@value #SPRINT_SPEED} blocks per second over the last ten ticks): use the
- *       configured walk/sprint gap hysteresis so a nearby follower does not repeatedly accelerate and brake.</li>
+ *   <li>The player sprints (synced flag, or {@value #SPRINT_SPEED} blocks per second over the last ten ticks): SPRINT.</li>
  *   <li>A SILENT quiet zone: SNEAK up to {@value #SNEAK_MIRROR_GAP} blocks, else WALK. CAUTION: SPRINT only from
  *       {@value #CAUTION_SPRINT_GAP} blocks, else WALK.</li>
  *   <li>The player walks (between {@value #WALK_SPEED} and {@value #SPRINT_SPEED} blocks per second): use that same gap
@@ -96,12 +95,14 @@ public final class FollowPace {
             }
             return Gait.WALK;
         }
-        // 4. A moving player can cross the follower's small personal-space gap every few
-        // ticks.  Do not turn their sprint flag into an immediate sprint order at that gap:
-        // share the configured catch-up hysteresis below so the follower accelerates only once
-        // they are meaningfully behind, and keeps that pace until it has actually caught up.
+        // 4. A sprinting player is already travelling at the follower's maximum sustainable
+        // speed.  Delaying the first sprint until the ordinary catch-up threshold creates a
+        // gap that the follower can only preserve, never close, once the player is moving at
+        // the same top speed.  The close-gap rule above still prevents a sprint directly beside
+        // the player; beyond it, start promptly and let the normal downgrade dwell smooth the
+        // eventual arrival.
         if (in.targetSprinting() || in.targetSpeedBps() >= SPRINT_SPEED) {
-            return catchUpGait(in);
+            return Gait.SPRINT;
         }
         // 5. Quiet zones.
         if (in.quiet() == QuietZone.Level.SILENT) {

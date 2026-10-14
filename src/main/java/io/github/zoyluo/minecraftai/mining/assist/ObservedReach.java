@@ -78,20 +78,27 @@ public final class ObservedReach {
 
     /** Horizontal neighbour offsets (dx, dz); order only affects which shortest path is found, not its length. */
     private static final int[][] HORIZONTAL = {{0, -1}, {0, 1}, {-1, 0}, {1, 0}};
+    /** {@link EndpointOverlay#stateAt(int, int, int)} value when this cell has no live-proof replacement. */
+    private static final int NO_ENDPOINT_OVERRIDE = -1;
 
     private ObservedReach() {
     }
 
     /** Runs the search described in the class comment. Deterministic; allocation is bounded by {@link #NODE_CAP}. */
     public static Result search(ObservedOccupancy occupancy, BlockPos from, BlockPos to) {
+        return searchInternal(occupancy, from, to, null);
+    }
+
+    private static Result searchInternal(ObservedOccupancy occupancy, BlockPos from, BlockPos to,
+                                         EndpointOverlay overlay) {
         if (occupancy == null || from == null || to == null) {
             return Result.INCONCLUSIVE;
         }
         if (!occupancy.inWindow(from) || !occupancy.inWindow(to)) {
             return Result.INCONCLUSIVE;
         }
-        if (!isValidStand(occupancy, from.getX(), from.getY(), from.getZ())
-                || !isValidStand(occupancy, to.getX(), to.getY(), to.getZ())) {
+        if (!isValidStand(occupancy, from.getX(), from.getY(), from.getZ(), overlay)
+                || !isValidStand(occupancy, to.getX(), to.getY(), to.getZ(), overlay)) {
             return Result.UNREACHABLE;
         }
         if (from.equals(to)) {
@@ -133,17 +140,17 @@ public final class ObservedReach {
                 int nx = x + dir[0];
                 int nz = z + dir[1];
 
-                tryPush(occupancy, bestG, open, nx, y, nz, cur.g, tx, ty, tz);
+                tryPush(occupancy, bestG, open, nx, y, nz, cur.g, tx, ty, tz, overlay);
 
-                if (passable(occupancy, x, y + 2, z)) {
-                    tryPush(occupancy, bestG, open, nx, y + 1, nz, cur.g, tx, ty, tz);
+                if (passable(occupancy, x, y + 2, z, overlay)) {
+                    tryPush(occupancy, bestG, open, nx, y + 1, nz, cur.g, tx, ty, tz, overlay);
                 }
 
                 for (int k = 1; k <= MAX_DROP; k++) {
-                    if (!columnPassable(occupancy, nx, y - k + 1, y + 1, nz)) {
+                    if (!columnPassable(occupancy, nx, y - k + 1, y + 1, nz, overlay)) {
                         break; // the range only grows with k, so a block here blocks every deeper drop too
                     }
-                    tryPush(occupancy, bestG, open, nx, y - k, nz, cur.g, tx, ty, tz);
+                    tryPush(occupancy, bestG, open, nx, y - k, nz, cur.g, tx, ty, tz, overlay);
                 }
             }
         }
@@ -151,12 +158,45 @@ public final class ObservedReach {
     }
 
     /**
+     * Runs {@link #search(ObservedOccupancy, BlockPos, BlockPos)} after the caller has independently re-proven
+     * both endpoint stand envelopes from live, directly observable world state.  The observed-occupancy sweep is a
+     * precheck, so stale endpoint cells must not turn that live proof into a hard route rejection. When the snapshot
+     * disagrees about an endpoint, this method overlays just the re-proven feet/head/floor cells while it searches.
+     * It returns {@link Result#UNREACHABLE} only if the corrected graph still proves an interior barrier; all other
+     * outcomes become {@link Result#INCONCLUSIVE}, never {@code REACHABLE}. The route implementation must still
+     * validate and execute the route normally.
+     *
+     * <p>When both endpoints are valid in the snapshot this is exactly {@link #search}. Do not use this overload
+     * without the separate current-world endpoint proof: ordinary observed-only callers must use {@link #search}.</p>
+     */
+    public static Result searchWithReprovenEndpoints(ObservedOccupancy occupancy, BlockPos from, BlockPos to) {
+        if (occupancy == null || from == null || to == null
+                || !occupancy.inWindow(from) || !occupancy.inWindow(to)) {
+            return searchInternal(occupancy, from, to, null);
+        }
+        boolean endpointsMatchSnapshot = isValidStand(occupancy, from.getX(), from.getY(), from.getZ(), null)
+                && isValidStand(occupancy, to.getX(), to.getY(), to.getZ(), null);
+        if (endpointsMatchSnapshot) {
+            return searchInternal(occupancy, from, to, null);
+        }
+        EndpointOverlay overlay = EndpointOverlay.create(from, to);
+        if (overlay == null) {
+            // Conflicting endpoint envelopes cannot both be live stand proofs. Preserve strict evidence if a
+            // caller violates the overload's contract instead of arbitrarily preferring AIR or SOLID.
+            return searchInternal(occupancy, from, to, null);
+        }
+        Result corrected = searchInternal(occupancy, from, to, overlay);
+        return corrected.status() == Status.UNREACHABLE ? Result.UNREACHABLE : Result.INCONCLUSIVE;
+    }
+
+    /**
      * Validates the candidate stand at {@code (x, y, z)}; when valid and strictly closer than any previously
      * known path to it, records the new distance and pushes it, ranked by {@code g + heuristic}.
      */
     private static void tryPush(ObservedOccupancy occupancy, Map<Long, Integer> bestG, PriorityQueue<Candidate> open,
-                                 int x, int y, int z, int curG, int tx, int ty, int tz) {
-        if (!isValidStand(occupancy, x, y, z)) {
+                                 int x, int y, int z, int curG, int tx, int ty, int tz,
+                                 EndpointOverlay overlay) {
+        if (!isValidStand(occupancy, x, y, z, overlay)) {
             return;
         }
         long key = BlockPos.asLong(x, y, z);
@@ -218,31 +258,87 @@ public final class ObservedReach {
     }
 
     /** A stand needs feet and head passable and floor SOLID/UNKNOWN (class comment). */
-    private static boolean isValidStand(ObservedOccupancy occupancy, int x, int y, int z) {
-        return passable(occupancy, x, y, z)
-                && passable(occupancy, x, y + 1, z)
-                && floor(occupancy, x, y - 1, z);
+    private static boolean isValidStand(ObservedOccupancy occupancy, int x, int y, int z,
+                                        EndpointOverlay overlay) {
+        return passable(occupancy, x, y, z, overlay)
+                && passable(occupancy, x, y + 1, z, overlay)
+                && floor(occupancy, x, y - 1, z, overlay);
     }
 
     /** AIR or UNKNOWN. */
-    private static boolean passable(ObservedOccupancy occupancy, int x, int y, int z) {
-        int s = occupancy.get(x, y, z);
+    private static boolean passable(ObservedOccupancy occupancy, int x, int y, int z, EndpointOverlay overlay) {
+        int s = stateAt(occupancy, x, y, z, overlay);
         return s == ObservedOccupancy.UNKNOWN || s == ObservedOccupancy.AIR;
     }
 
     /** SOLID or UNKNOWN. */
-    private static boolean floor(ObservedOccupancy occupancy, int x, int y, int z) {
-        int s = occupancy.get(x, y, z);
+    private static boolean floor(ObservedOccupancy occupancy, int x, int y, int z, EndpointOverlay overlay) {
+        int s = stateAt(occupancy, x, y, z, overlay);
         return s == ObservedOccupancy.UNKNOWN || s == ObservedOccupancy.SOLID;
     }
 
     /** True iff every cell of the column at {@code (x, ?, z)} from {@code loY} to {@code hiY} (inclusive) is passable. */
-    private static boolean columnPassable(ObservedOccupancy occupancy, int x, int loY, int hiY, int z) {
+    private static boolean columnPassable(ObservedOccupancy occupancy, int x, int loY, int hiY, int z,
+                                          EndpointOverlay overlay) {
         for (int y = loY; y <= hiY; y++) {
-            if (!passable(occupancy, x, y, z)) {
+            if (!passable(occupancy, x, y, z, overlay)) {
                 return false;
             }
         }
         return true;
+    }
+
+    private static int stateAt(ObservedOccupancy occupancy, int x, int y, int z, EndpointOverlay overlay) {
+        if (overlay != null) {
+            int replacement = overlay.stateAt(x, y, z);
+            if (replacement != NO_ENDPOINT_OVERRIDE) {
+                return replacement;
+            }
+        }
+        return occupancy.get(x, y, z);
+    }
+
+    /** Logical, non-mutating replacement for the two endpoints independently proved live by the caller. */
+    private record EndpointOverlay(long firstFeet, long firstHead, long firstFloor,
+                                   long secondFeet, long secondHead, long secondFloor) {
+        static EndpointOverlay create(BlockPos first, BlockPos second) {
+            long firstFeet = key(first, 0);
+            long firstHead = key(first, 1);
+            long firstFloor = key(first, -1);
+            long secondFeet = key(second, 0);
+            long secondHead = key(second, 1);
+            long secondFloor = key(second, -1);
+            if (floorOverlapsBody(firstFloor, secondFloor, firstFeet, firstHead, secondFeet, secondHead)) {
+                return null;
+            }
+            return new EndpointOverlay(firstFeet, firstHead, firstFloor, secondFeet, secondHead, secondFloor);
+        }
+
+        int stateAt(int x, int y, int z) {
+            long key = BlockPos.asLong(x, y, z);
+            if (key == firstFeet || key == firstHead || key == secondFeet || key == secondHead) {
+                return ObservedOccupancy.AIR;
+            }
+            if (key == firstFloor || key == secondFloor) {
+                return ObservedOccupancy.SOLID;
+            }
+            return NO_ENDPOINT_OVERRIDE;
+        }
+
+        private static long key(BlockPos pos, int yOffset) {
+            return BlockPos.asLong(pos.getX(), pos.getY() + yOffset, pos.getZ());
+        }
+
+        private static boolean floorOverlapsBody(long firstFloor, long secondFloor,
+                                                 long firstFeet, long firstHead,
+                                                 long secondFeet, long secondHead) {
+            return matchesBody(firstFloor, firstFeet, firstHead, secondFeet, secondHead)
+                    || matchesBody(secondFloor, firstFeet, firstHead, secondFeet, secondHead);
+        }
+
+        private static boolean matchesBody(long cell, long firstFeet, long firstHead,
+                                           long secondFeet, long secondHead) {
+            return cell == firstFeet || cell == firstHead || cell == secondFeet || cell == secondHead;
+        }
     }
 }

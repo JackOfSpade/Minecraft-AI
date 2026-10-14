@@ -1,0 +1,106 @@
+Keep a traverse's documented overshoot recovery only when the immutable calculation
+authority admits both possible recovery feet cells. A bounded route can then use its
+ordinary in-bound cardinal leg without declaring an outside overshoot as success;
+the host's physical sweep remains the final backstop for real motion.
+
+diff --git a/src/main/java/baritone/pathing/movement/Moves.java b/src/main/java/baritone/pathing/movement/Moves.java
+--- a/src/main/java/baritone/pathing/movement/Moves.java
++++ b/src/main/java/baritone/pathing/movement/Moves.java
+@@ -55,7 +55,7 @@ public enum Moves {
+     TRAVERSE_NORTH(0, 0, -1) {
+         @Override
+         public Movement apply0(CalculationContext context, BetterBlockPos src) {
+-            return new MovementTraverse(context.getBaritone(), src, src.north());
++            return new MovementTraverse(context, src, src.north());
+         }
+ 
+         @Override
+@@ -67,7 +67,7 @@ public enum Moves {
+     TRAVERSE_SOUTH(0, 0, +1) {
+         @Override
+         public Movement apply0(CalculationContext context, BetterBlockPos src) {
+-            return new MovementTraverse(context.getBaritone(), src, src.south());
++            return new MovementTraverse(context, src, src.south());
+         }
+ 
+         @Override
+@@ -79,7 +79,7 @@ public enum Moves {
+     TRAVERSE_EAST(+1, 0, 0) {
+         @Override
+         public Movement apply0(CalculationContext context, BetterBlockPos src) {
+-            return new MovementTraverse(context.getBaritone(), src, src.east());
++            return new MovementTraverse(context, src, src.east());
+         }
+ 
+         @Override
+@@ -91,7 +91,7 @@ public enum Moves {
+     TRAVERSE_WEST(-1, 0, 0) {
+         @Override
+         public Movement apply0(CalculationContext context, BetterBlockPos src) {
+-            return new MovementTraverse(context.getBaritone(), src, src.west());
++            return new MovementTraverse(context, src, src.west());
+         }
+ 
+         @Override
+diff --git a/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java b/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java
+--- a/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java
++++ b/src/main/java/baritone/pathing/movement/movements/MovementTraverse.java
+@@ -52,9 +52,12 @@ public class MovementTraverse extends Movement {
+      * Did we have to place a bridge block or was it always there
+      */
+     private boolean wasTheBridgeBlockAlwaysThere = true;
++    /** Captured with the calculation, so a route cannot later accept an outside overshoot. */
++    private final boolean overshootAllowed;
+ 
+-    public MovementTraverse(IBaritone baritone, BetterBlockPos from, BetterBlockPos to) {
+-        super(baritone, from, to, new BetterBlockPos[]{to.above(), to}, to.below());
++    public MovementTraverse(CalculationContext context, BetterBlockPos from, BetterBlockPos to) {
++        super(context.getBaritone(), from, to, new BetterBlockPos[]{to.above(), to}, to.below());
++        this.overshootAllowed = navigationOvershootAllowed(context, from, to);
+     }
+ 
+     @Override
+@@ -76,12 +79,34 @@ public class MovementTraverse extends Movement {
+ 
+     @Override
+     protected void addDeclaredMovementCells(Set<BetterBlockPos> cells) {
++        if (!overshootAllowed) {
++            return;
++        }
+         // overshootTraverse recognizes up to two cells beyond dest as a successful traverse.
+         BetterBlockPos firstOvershoot = new BetterBlockPos(dest.offset(getDirection()));
+         cells.add(firstOvershoot);
+         cells.add(new BetterBlockPos(firstOvershoot.offset(getDirection())));
+     }
+ 
++    /**
++     * Freeze the two success-recovery feet cells with the same planner snapshot that builds the
++     * move. Their later execution must not turn a locally bounded route into an outside body.
++     */
++    private static boolean navigationOvershootAllowed(CalculationContext context,
++                                                      BetterBlockPos from, BetterBlockPos to) {
++        if (!Baritone.settings().overshootTraverse.value) {
++            return false;
++        }
++        int deltaX = to.getX() - from.getX();
++        int deltaZ = to.getZ() - from.getZ();
++        int firstX = to.getX() + deltaX;
++        int firstZ = to.getZ() + deltaZ;
++        int secondX = firstX + deltaX;
++        int secondZ = firstZ + deltaZ;
++        return context.bsi.isNavigationCellAllowed(firstX, to.getY(), firstZ)
++                && context.bsi.isNavigationCellAllowed(secondX, to.getY(), secondZ);
++    }
++
+     public static double cost(CalculationContext context, int x, int y, int z, int destX, int destZ) {
+         BlockState pb0 = context.get(destX, y + 1, destZ);
+         BlockState pb1 = context.get(destX, y, destZ);
+@@ -268,7 +289,7 @@ public class MovementTraverse extends Movement {
+             if (feet.equals(dest)) {
+                 return state.setStatus(MovementStatus.SUCCESS);
+             }
+-            if (Baritone.settings().overshootTraverse.value && (feet.equals(dest.offset(getDirection())) || feet.equals(dest.offset(getDirection()).offset(getDirection())))) {
++            if (overshootAllowed && (feet.equals(dest.offset(getDirection())) || feet.equals(dest.offset(getDirection()).offset(getDirection())))) {
+                 return state.setStatus(MovementStatus.SUCCESS);
+             }
+             Block low = BlockStateInterface.get(ctx, src).getBlock();

@@ -544,7 +544,16 @@ public final class FarmTask extends AbstractTask implements CheckpointableTask {
             return;
         }
         BlockPos focus = current.action() == TargetAction.HARVEST ? current.ground().above() : current.ground();
-        if (bot.getEyePosition().distanceTo(focus.getCenter()) <= 4.5D) {
+        // Do not turn a broad centre-distance estimate into an item use. Tilling and planting
+        // click the ground's exact top face, while harvesting clicks the crop outline; the action
+        // layer proves both through vanilla reach and a strict ray. Reuse that admission here so
+        // a field edge is approached until a real click can succeed instead of blacklisting the
+        // last cell after a transient face/refusal mismatch.
+        boolean actionAdmissible = current.action() == TargetAction.HARVEST
+                ? bot.isWithinBlockInteractionRange(focus, 0.0D)
+                        && ObservableWorldQuery.canObserveFarmCellStrict(bot, focus)
+                : FarmAction.canUseTopFace(bot, focus);
+        if (actionAdmissible) {
             bot.getActionPack().stopAll();
             phase = switch (current.action()) {
                 case HARVEST -> Phase.HARVEST;
@@ -597,7 +606,11 @@ public final class FarmTask extends AbstractTask implements CheckpointableTask {
             return;
         }
         tillAttempts = 0;
-        phase = Phase.PLANT;
+        // Dirt has a full-height outline, while the farmland just created is 15/16 high.  Do not
+        // reuse the pre-till pose for the seed click: turn this into an explicit planting target
+        // and re-enter GOTO, which re-proves the live farmland top face before it equips a seed.
+        current = new FarmTarget(current.ground(), TargetAction.PLANT);
+        phase = Phase.GOTO;
     }
 
     private void plant(AIPlayerEntity bot) {

@@ -12,6 +12,7 @@ import io.github.zoyluo.minecraftai.runtime.ExecutionStack;
 import io.github.zoyluo.minecraftai.runtime.RuntimeLifecycleCoordinator;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 
 import java.util.Map;
 import java.util.Optional;
@@ -503,6 +504,23 @@ public final class TaskManager {
                 pendingFailure.remove(uuid);
                 BotLog.task(player, "task_cancelled", "name", task.name(), "reason", task.failureReason());
             }
+        }
+    }
+
+    /**
+     * Observes active owner-follow tasks before players tick out of a source portal.  Task ticking
+     * happens at END_SERVER_TICK, which is too late to retain the source-side proof for a player
+     * who transfers dimensions in this world tick.
+     */
+    public void observePortalDepartures(ServerLevel level) {
+        for (Map.Entry<UUID, Task> entry : new ArrayList<>(active.entrySet())) {
+            Task task = entry.getValue();
+            if (!(task instanceof FollowTask follow) || active.get(entry.getKey()) != task) {
+                continue;
+            }
+            AIPlayerManager.INSTANCE.getByUuid(entry.getKey())
+                    .filter(bot -> bot.isAlive() && !bot.isRemoved() && bot.level() == level)
+                    .ifPresent(follow::observePortalDeparture);
         }
     }
 

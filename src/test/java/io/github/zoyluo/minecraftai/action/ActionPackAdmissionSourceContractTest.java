@@ -171,7 +171,7 @@ class ActionPackAdmissionSourceContractTest {
         assertTaskLeaseLifecycle("task/FollowStuckRecovery.java", "private StepStart beginStep(",
                 "step = next", "stepLease = lease", "FollowStuckRecovery");
         assertTaskLeaseLifecycle("task/FollowSwimming.java",
-                "private boolean beginStep(AIPlayerEntity bot, BlockPos cell, String reason, boolean chargeStrictAdmission)",
+                "private StepAdmissionResult tryBeginStep(AIPlayerEntity bot, BlockPos cell, String reason,",
                 "stepLease = lease", "stepAdmission = admission", "FollowSwimming");
         assertTaskLeaseLifecycle("task/MiningBarricadeTask.java", "private void tickRetreat(",
                 "retreatStep = next", "retreatStepLease = lease", "MiningBarricadeTask");

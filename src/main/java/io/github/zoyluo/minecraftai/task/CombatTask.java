@@ -15,6 +15,7 @@ import io.github.zoyluo.minecraftai.action.StrikeLegality;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
 import java.util.List;
 import java.util.OptionalInt;
 import net.minecraft.core.BlockPos;
@@ -59,7 +60,15 @@ public final class CombatTask extends AbstractTask {
     // Vanilla Creeper ignition only backs off beyond seven blocks (or after LOS is broken).
     private static final double CREEPER_HEAL_SAFE_DISTANCE = 8.0D;
     private static final int RETREAT_STEP_DISTANCE = 6;
+    /** A shorter bounded retry when the ordinary retreat fan leaves an anchored work site. */
+    private static final int RETREAT_SHORT_LEG_DISTANCE = 3;
     private static final int LOST_SIGHT_LIMIT = 50; // Target blocked by a wall (no line of sight) for 2.5s straight -> end combat instead of foolishly fighting until timeout
+    /**
+     * The compatibility overload that accepts an anchor is intentionally conservative: it must
+     * never turn a local defense request into a descent or an open-ended cross-site chase.
+     */
+    private static final int LEGACY_DEFENSIVE_MAX_VERTICAL_DROP = 2;
+    private static final int LEGACY_DEFENSIVE_MAX_HORIZONTAL_DISTANCE = 8;
     /** A blocked enemy line holds the drawn or loaded weapon this long before falling back to melee. */
     private static final int BLOCKED_SHOT_HOLD_LIMIT = 60;
     /** After a shot stayed blocked this long, the ranged weapon stays out of the plan this many ticks. */
@@ -84,6 +93,10 @@ public final class CombatTask extends AbstractTask {
     private final int targetKills;
     private final float retreatHpThreshold;
     private final LivingEntity fixedDefensiveTarget;
+    /** Null for current unanchored defensive combat; set only by the legacy anchored overload. */
+    private final BlockPos defensiveAnchor;
+    /** One shared immutable definition for anchored Baritone routes and direct combat inputs. */
+    private final NavRoute.MovementBoundary defensiveBoundary;
     private Phase phase = Phase.ACQUIRE;
     private LivingEntity target;
     private int kills;
@@ -127,34 +140,43 @@ public final class CombatTask extends AbstractTask {
     private int rangedSuppressedUntil;
 
     public CombatTask(EntityType<?> targetType, int targetKills, float retreatHpThreshold) {
-        this(targetType, targetKills, retreatHpThreshold, null);
+        this(targetType, targetKills, retreatHpThreshold, null, null);
     }
 
     private CombatTask(EntityType<?> targetType,
                        int targetKills,
                        float retreatHpThreshold,
-                       LivingEntity fixedDefensiveTarget) {
+                       LivingEntity fixedDefensiveTarget,
+                       BlockPos defensiveAnchor) {
         this.targetType = targetType;
         this.targetKills = Math.max(1, targetKills);
         this.retreatHpThreshold = retreatHpThreshold;
         this.fixedDefensiveTarget = fixedDefensiveTarget;
+        this.defensiveAnchor = defensiveAnchor == null ? null : defensiveAnchor.immutable();
+        this.defensiveBoundary = defensiveMovementBoundary(this.defensiveAnchor);
     }
 
     public static CombatTask defensive(LivingEntity threat, float retreatHpThreshold) {
         if (threat == null) {
             throw new IllegalArgumentException("defensive_combat_requires_target");
         }
-        return new CombatTask(threat.getType(), 1, retreatHpThreshold, threat);
+        return new CombatTask(threat.getType(), 1, retreatHpThreshold, threat, null);
     }
 
     /**
-     * Kept for callers restored from older task records. The anchor is deliberately ignored:
-     * defensive combat now follows the confirmed aggressor instead of enforcing an owner radius.
+     * Compatibility entry point for persisted callers that explicitly supplied a work-site anchor.
+     * Unlike {@link #defensive(LivingEntity, float)}, this form keeps the fight on the anchor's
+     * horizontal layer and refuses to chase a target down a drop or out of the local defense area.
+     * It still stays in RETREAT for a hostile that is already able to hit the bot, rather than
+     * completing and exposing the interrupted task to a free hit.
      */
     public static CombatTask defensive(LivingEntity threat,
                                        float retreatHpThreshold,
-                                       BlockPos ignoredAnchor) {
-        return defensive(threat, retreatHpThreshold);
+                                       BlockPos anchor) {
+        if (threat == null || anchor == null) {
+            throw new IllegalArgumentException("anchored_defensive_combat_requires_target_and_anchor");
+        }
+        return new CombatTask(threat.getType(), 1, retreatHpThreshold, threat, anchor);
     }
 
     @Override
@@ -682,7 +704,7 @@ public final class CombatTask extends AbstractTask {
         // use-item slowdown (a raised shield) is applied here, as LocalPlayer applies it to a player's keys.
         float slowdown = PaceRules.inputScale(false, bot.isUsingItem());
         bot.getActionPack().setStrafing(CombatCore.safeStrafeInput(
-                bot, elapsed % 40 < 20 ? 0.45F : -0.45F) * slowdown);
+                bot, elapsed % 40 < 20 ? 0.45F : -0.45F, defensiveBoundary) * slowdown);
         repositionTicks--;
         if (repositionTicks <= 0) {
             bot.getActionPack().stopMovement();
@@ -703,6 +725,14 @@ public final class CombatTask extends AbstractTask {
                 phase = Phase.HEAL;
             }
             return;
+        }
+
+        if (anchoredRetreatLegNeedsRestart(bot)) {
+            // A path can be displaced by a knockback or become stale after admission.  Do not
+            // let its old endpoint keep steering an anchored defense beyond the protected site;
+            // the bounded retry below may still find a safe in-leash leg this tick.
+            bot.getActionPack().stopAll();
+            retreatDestination = null;
         }
 
         double distance = bot.distanceTo(threat);
@@ -737,9 +767,7 @@ public final class CombatTask extends AbstractTask {
         }
 
         if (retreatDestination == null || bot.getActionPack().isPathExecutorIdle()) {
-            retreatDestination = EvadeTask.admitBestSurfaceEscapePath(
-                    bot, threat, threat.blockPosition(),
-                    RETREAT_STEP_DISTANCE);
+            retreatDestination = admitRetreatPath(bot, threat);
             if (retreatDestination == null) {
                 // A factual contact hostile can leave no walkable way to increase distance.
                 // Keep this safety owner alive so the ready-tick counterstrike above can clear
@@ -759,7 +787,49 @@ public final class CombatTask extends AbstractTask {
         }
     }
 
+    /**
+     * An anchored defensive retreat admits only endpoints inside the legacy work-site leash.
+     * If the full six-block fan has no such endpoint, retry a three-block leg before relying on
+     * the existing immediate-pressure hold/counterattack fallback.
+     */
+    private BlockPos admitRetreatPath(AIPlayerEntity bot, LivingEntity threat) {
+        if (defensiveAnchor == null) {
+            return EvadeTask.admitBestSurfaceEscapePath(
+                    bot, threat, threat.blockPosition(), RETREAT_STEP_DISTANCE);
+        }
+        BlockPos fullLeg = EvadeTask.admitBestSurfaceEscapePath(
+                bot, threat, threat.blockPosition(), RETREAT_STEP_DISTANCE,
+                candidate -> isDefensiveRetreatEndpointAllowed(defensiveAnchor, candidate),
+                candidate -> bot.getActionPack().startSurfacePathWithinBoundary(candidate, defensiveBoundary));
+        if (fullLeg != null) {
+            return fullLeg;
+        }
+        return EvadeTask.admitBestSurfaceEscapePath(
+                bot, threat, threat.blockPosition(), RETREAT_SHORT_LEG_DISTANCE,
+                candidate -> isDefensiveRetreatEndpointAllowed(defensiveAnchor, candidate),
+                candidate -> bot.getActionPack().startSurfacePathWithinBoundary(candidate, defensiveBoundary));
+    }
+
+    /** Cancels a stale anchored retreat leg before it can continue from or toward an invalid cell. */
+    private boolean anchoredRetreatLegNeedsRestart(AIPlayerEntity bot) {
+        if (defensiveAnchor == null) {
+            return false;
+        }
+        if (!isWithinDefensiveLeash(defensiveAnchor, bot.blockPosition())
+                || retreatDestination != null
+                && !isDefensiveRetreatEndpointAllowed(defensiveAnchor, retreatDestination)) {
+            return true;
+        }
+        BlockPos activeGoal = bot.getActionPack().activePathGoal();
+        return activeGoal != null && !isDefensiveRetreatEndpointAllowed(defensiveAnchor, activeGoal);
+    }
+
     private void beginRetreat(AIPlayerEntity bot) {
+        // This can interrupt an input-driven cover stage or an in-flight approach. Let go now,
+        // rather than waiting for the next phase tick, before the bounded retreat chooses a new
+        // path (or holds position under immediate ranged pressure).
+        cancelPeekStep(bot);
+        bot.getActionPack().stopNavigation();
         finishRangedLoadout(bot);
         bot.stopUsingItem();
         healTicks = 0;
@@ -855,10 +925,47 @@ public final class CombatTask extends AbstractTask {
         if (!defensiveEngagementAllowed(bot) || phase == Phase.RETREAT) {
             return;
         }
+        if (defensiveBoundary != null) {
+            ActionResult result = bot.getActionPack().startSurfacePathWithinBoundary(
+                    target.blockPosition(), defensiveBoundary);
+            if (result.isFailed()) {
+                // Unlike ordinary combat, anchored compatibility mode may not fall back to the
+                // unrestricted coordinate walk in CombatCore.startApproach(). A later combat
+                // tick can re-evaluate the target or choose its bounded retreat fallback.
+                bot.getActionPack().stopNavigation();
+            }
+            return;
+        }
         CombatCore.startApproach(bot, target);
     }
 
     private boolean defensiveEngagementAllowed(AIPlayerEntity bot) {
+        if (defensiveAnchor != null) {
+            BlockPos here = bot.blockPosition();
+            if (!isWithinDefensiveLeash(defensiveAnchor, here)) {
+                return disengageOrRetreatFromImmediatePressure(bot, "bot_left_legacy_leash", here);
+            }
+            if (target != null && target.isAlive()) {
+                BlockPos targetPos = target.blockPosition();
+                // A stationary bow shot does not move the bot through the legacy boundary, so it
+                // remains a safe response to a distant target outside the local work site.
+                if (!isWithinDefensiveLeash(defensiveAnchor, targetPos)
+                        && !canShootFromWhereItStands(bot, target)) {
+                    // A melee mob more than two blocks below the anchor cannot currently strike
+                    // the bot. Do not manufacture a retreat merely because Euclidean distance
+                    // puts it inside the broader heal buffer: that would retain a task that has
+                    // no safe, in-bounds pursuit and could route the bot down the drop. A ranged
+                    // shooter or an entity already in actual melee reach remains a live pressure
+                    // source and is handled through RETREAT instead.
+                    if (targetBelowDefensiveFloor(targetPos)
+                            && !hasAnchoredAttackPressure(bot)) {
+                        endAnchoredDefensiveEngagement(bot, "target_below_anchor_floor", targetPos);
+                        return false;
+                    }
+                    return disengageOrRetreatFromImmediatePressure(bot, "target_left_legacy_leash", targetPos);
+                }
+            }
+        }
         int visibleHostiles = observableActiveHostiles(bot).size();
         if (visibleHostiles > MinecraftAiConfig.get().combat().maxEnemiesToFight()) {
             if (phase != Phase.RETREAT) {
@@ -867,6 +974,39 @@ public final class CombatTask extends AbstractTask {
             return false;
         }
         return true;
+    }
+
+    /**
+     * The persisted-anchor policy is a movement boundary, not a licence to end a fight while a
+     * hostile can strike or shoot the bot from its current cell. This is deliberately narrower
+     * than {@link #isImmediatePressure(AIPlayerEntity, LivingEntity)}: the latter includes the
+     * wider safe-heal buffer, whereas this decision is about actual current attack reach.
+     */
+    private boolean hasAnchoredAttackPressure(AIPlayerEntity bot) {
+        if (canAttackFromCurrentPosition(bot, target)) {
+            return true;
+        }
+        return observableActiveHostiles(bot).stream()
+                .anyMatch(hostile -> hostile != target && canAttackFromCurrentPosition(bot, hostile));
+    }
+
+    private static boolean canAttackFromCurrentPosition(AIPlayerEntity bot, LivingEntity hostile) {
+        return isObservablePressure(bot, hostile)
+                && (CombatCore.isRangedThreat(hostile) || CombatCore.inMeleeRange(bot, hostile));
+    }
+
+    private boolean disengageOrRetreatFromImmediatePressure(AIPlayerEntity bot,
+                                                              String reason,
+                                                              BlockPos observed) {
+        LivingEntity pressure = refreshRetreatThreat(bot);
+        if (isImmediatePressure(bot, pressure)) {
+            if (phase != Phase.RETREAT) {
+                beginRetreat(bot);
+            }
+            return true;
+        }
+        endAnchoredDefensiveEngagement(bot, reason, observed);
+        return false;
     }
 
     /**
@@ -959,6 +1099,45 @@ public final class CombatTask extends AbstractTask {
         return bot.distanceTo(entity) < safeDistance;
     }
 
+    /**
+     * The legacy anchored defensive overload may hold its current layer or move upward, but it
+     * never follows a target more than two blocks below the caller's protected work-site anchor.
+     * Its horizontal radius is likewise bounded so a compatibility caller cannot turn defense
+     * into an open-ended pursuit.
+     */
+    static boolean isWithinDefensiveLeash(BlockPos anchor, BlockPos position) {
+        NavRoute.MovementBoundary boundary = defensiveMovementBoundary(anchor);
+        return boundary != null && boundary.allowsFeet(position);
+    }
+
+    /** The one persisted-anchor policy shared by every route, strafe, and input-driven cover step. */
+    static NavRoute.MovementBoundary defensiveMovementBoundary(BlockPos anchor) {
+        return anchor == null ? null : new NavRoute.MovementBoundary(anchor,
+                LEGACY_DEFENSIVE_MAX_HORIZONTAL_DISTANCE,
+                anchor.getY() - LEGACY_DEFENSIVE_MAX_VERTICAL_DROP);
+    }
+
+    /** True when an escape-route endpoint may be admitted for an optional anchored defense. */
+    static boolean isDefensiveRetreatEndpointAllowed(BlockPos anchor, BlockPos endpoint) {
+        return endpoint != null && (anchor == null || isWithinDefensiveLeash(anchor, endpoint));
+    }
+
+    private boolean targetBelowDefensiveFloor(BlockPos targetPosition) {
+        return targetPosition.getY() < defensiveAnchor.getY() - LEGACY_DEFENSIVE_MAX_VERTICAL_DROP;
+    }
+
+    private void endAnchoredDefensiveEngagement(AIPlayerEntity bot, String reason, BlockPos observed) {
+        finishRangedLoadout(bot);
+        bot.getActionPack().stopAll();
+        retreatThreat = null;
+        retreatDestination = null;
+        BotLog.danger(bot, "defensive_combat_disengaged",
+                "reason", reason,
+                "anchor", defensiveAnchor.toShortString(),
+                "observed", observed.toShortString());
+        complete();
+    }
+
     /** The entity a defensive fight is bound to; {@code null} for an ordinary (non-defensive) fight. */
     LivingEntity defensiveTarget() {
         return fixedDefensiveTarget;
@@ -1041,6 +1220,8 @@ public final class CombatTask extends AbstractTask {
 
     private void beginPeekaboo(AIPlayerEntity bot) {
         if (peekCoverFeet != null && peekHideSpot != null
+                && allowsDefensiveFeet(peekHideSpot) && allowsDefensiveFeet(peekCoverFeet)
+                && peekExposeSpot != null && allowsDefensiveFeet(peekExposeSpot)
                 && bot.blockPosition().equals(peekHideSpot)
                 && isObservableSolid(bot, peekCoverFeet) && isObservableSolid(bot, peekCoverFeet.above())) {
             // Cover from an earlier cycle is still standing right where the bot already is.
@@ -1072,11 +1253,15 @@ public final class CombatTask extends AbstractTask {
         }
         BlockPos hideSpot = bot.blockPosition().immutable();
         BlockPos coverFeet = hideSpot.relative(towardTarget).immutable();
+        if (!allowsDefensiveFeet(hideSpot) || !allowsDefensiveFeet(coverFeet)) {
+            abandonPeekaboo(bot, "peekaboo_movement_boundary");
+            return;
+        }
         Direction sideStep = towardTarget.getClockWise();
         BlockPos exposeSpot = hideSpot.relative(sideStep).immutable();
-        if (!canStandAt(bot, exposeSpot)) {
+        if (!allowsDefensiveFeet(exposeSpot) || !canStandAt(bot, exposeSpot)) {
             exposeSpot = hideSpot.relative(sideStep.getOpposite()).immutable();
-            if (!canStandAt(bot, exposeSpot)) {
+            if (!allowsDefensiveFeet(exposeSpot) || !canStandAt(bot, exposeSpot)) {
                 abandonPeekaboo(bot, "peekaboo_no_expose_spot");
                 return;
             }
@@ -1103,6 +1288,9 @@ public final class CombatTask extends AbstractTask {
     }
 
     private String placePeekabooColumnBlock(AIPlayerEntity bot, BlockPos target) {
+        if (defensiveBoundary != null && !defensiveBoundary.allowsColumn(target.getX(), target.getZ())) {
+            return "movement_boundary";
+        }
         if (bot.getBoundingBox().intersects(new AABB(target))) {
             return "target_intersects_bot";
         }
@@ -1124,6 +1312,11 @@ public final class CombatTask extends AbstractTask {
         return ObservableWorldQuery.canObserveCell(bot, feet)
                 && ObservableWorldQuery.canObserveCell(bot, feet.above())
                 && ObservableWorldQuery.canObserveColliderWithInsetFaces(bot, feet.below());
+    }
+
+    /** Unanchored combat retains the normal cover fan; anchored cover cells share the route boundary. */
+    private boolean allowsDefensiveFeet(BlockPos feet) {
+        return defensiveBoundary == null || defensiveBoundary.allowsFeet(feet);
     }
 
     private static boolean isObservableSolid(AIPlayerEntity bot, BlockPos pos) {
@@ -1174,7 +1367,7 @@ public final class CombatTask extends AbstractTask {
         if (!bot.blockPosition().equals(peekHideSpot) && bot.getActionPack().isPathExecutorIdle()) {
             // Knocked out of its hiding cell: walk back in, by inputs, like a player would.
             if (peekStep == null || !peekStep.cell().equals(peekHideSpot)) {
-                peekStep = CombatCore.beginStepByInput(peekHideSpot, false, false);
+                peekStep = CombatCore.beginStepByInput(peekHideSpot, false, false, defensiveBoundary);
             }
             CombatCore.StepStatus returning = CombatCore.stepByInput(bot, peekStep);
             if (returning == CombatCore.StepStatus.FAILED) {
@@ -1257,7 +1450,7 @@ public final class CombatTask extends AbstractTask {
             // Aim first: the strafe below is computed in the current yaw frame, so the weapon stays on target.
             CombatCore.aimForShot(bot, target);
             if (peekStep == null) {
-                peekStep = CombatCore.beginStepByInput(peekExposeSpot, true, false);
+                peekStep = CombatCore.beginStepByInput(peekExposeSpot, true, false, defensiveBoundary);
             }
             CombatCore.StepStatus status = CombatCore.stepByInput(bot, peekStep);
             if (status == CombatCore.StepStatus.FAILED) {
@@ -1308,7 +1501,7 @@ public final class CombatTask extends AbstractTask {
             peekStage = PeekStage.BACK;
         }
         if (peekStep == null) {
-            peekStep = CombatCore.beginStepByInput(peekHideSpot, true, false);
+            peekStep = CombatCore.beginStepByInput(peekHideSpot, true, false, defensiveBoundary);
         }
         CombatCore.aimForShot(bot, target);
         CombatCore.StepStatus back = CombatCore.stepByInput(bot, peekStep);

@@ -50,9 +50,10 @@ import net.minecraft.world.level.block.state.BlockState;
  * and the way back down is the stair itself. A rise needs a wall to start in, so a bot standing in
  * the middle of a room first walks to the nearest wall it can see. A step is opened only when what
  * the bot can see allows it ({@link StairDig}: no fluid or falling block over, beside or in the
- * cells, nothing a bot may not dig, no player standing on it). A falling block is the one exception:
- * the bot first backs up one proven stair cell, clears the bottom of that falling column from the
- * side, waits for the column to settle, and only then chooses its next rise. A heading that is
+ * cells, nothing a bot may not dig, no player standing on it). A falling block is the one exception
+ * of last resort: the bot turns to another observed rise first; only when every rise is blocked does
+ * it back up one proven stair cell, clear the bottom of that falling column from the side, wait for
+ * the column to settle, and try again. A heading that is
  * refused is turned from, to the right, then the left, then back, and the task ends when all four are. Every rise
  * gains a block, and a walk to a wall never goes back onto a cell the bot has stood in since the
  * last rise, so it cannot go in circles; it ends at the build limit if nothing else stops it.</p>
@@ -266,6 +267,8 @@ public final class DigOutTask extends AbstractTask {
             return;
         }
         Direction[] order = {heading, heading.getClockWise(), heading.getCounterClockWise(), heading.getOpposite()};
+        OreClimb.Move gravityMove = null;
+        StairDig.Refusal gravityRefusal = null;
         for (Direction direction : order) {
             OreClimb.Move move = new OreClimb.Move(direction, true);
             String why = failedSteps.get(stepKey(feet, OreClimb.landing(feet, move)));
@@ -276,9 +279,14 @@ public final class DigOutTask extends AbstractTask {
                     closeFlow(bot, feet, pendingFlow);
                     return;
                 }
-                if (refusal != null && MiningSafety.GRAVITY.equals(refusal.reason())
-                        && beginGravityClearance(bot, world, feet, move, refusal)) {
-                    return;
+                if (refusal != null && MiningSafety.GRAVITY.equals(refusal.reason())) {
+                    // A loose gravel/sand column is recoverable, but preserving it is safer and
+                    // cheaper when another observed heading can make the next rise.  Defer the
+                    // destructive side-clear until every ordinary heading has been ruled out.
+                    if (gravityMove == null) {
+                        gravityMove = move;
+                        gravityRefusal = refusal;
+                    }
                 }
                 why = refusal != null ? refusal.reason() : touchesSealedCell(feet, move) ? SEALED_FLOW : null;
             }
@@ -295,6 +303,14 @@ public final class DigOutTask extends AbstractTask {
                 // A room's open side is refused for want of a floor; what it is told about the rock is the reason worth giving.
                 lastRockRefusal = why;
             }
+        }
+        // An automatic dark-trap escape has other walls to try and must leave loose terrain
+        // alone: disturbing gravel to buy a marginal shortcut can collapse it into the route.
+        // A player expressly asking for the surface can opt into the bounded last-resort
+        // clearance below only after every ordinary heading was refused.
+        if (requireSurface && gravityMove != null && gravityRefusal != null
+                && beginGravityClearance(bot, world, feet, gravityMove, gravityRefusal)) {
+            return;
         }
         // No rise from here. In the middle of a room there is no wall to start one in: walk to the nearest.
         Direction toWall = wallToWalkTo(bot, world, feet);
@@ -345,10 +361,11 @@ public final class DigOutTask extends AbstractTask {
     // ---- falling blocks ---------------------------------------------------------------------------------------------
 
     /**
-     * Begins a local gravity recovery instead of giving up on the whole stair.  The ordinary
-     * {@link MiningSafety} verdict remains strict for every other digger; only this stair knows
-     * its own proven way back down and can therefore clear a falling column without standing
-     * beneath it.
+     * Begins a local, player-requested surface-excavation recovery instead of giving up on the
+     * whole stair. Automatic dark-trap recovery always preserves a loose column and turns away.
+     * The ordinary {@link MiningSafety} verdict remains strict for every other digger; only this
+     * stair knows its own proven way back down and can therefore clear a falling column without
+     * standing beneath it.
      */
     private boolean beginGravityClearance(AIPlayerEntity bot, ServerLevel world, BlockPos feet,
                                           OreClimb.Move move, StairDig.Refusal refusal) {

@@ -2,6 +2,7 @@ package io.github.zoyluo.minecraftai.baritone;
 
 import baritone.api.IBaritone;
 import baritone.api.utils.input.Input;
+import io.github.zoyluo.minecraftai.MinecraftAiConfig;
 import io.github.zoyluo.minecraftai.action.ActionPack;
 import io.github.zoyluo.minecraftai.action.ActionResult;
 import io.github.zoyluo.minecraftai.action.MiningController;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -578,8 +580,7 @@ public final class BaritoneNavigationGameTests {
     /** x=-2..14, z=-3..3; a full-width gap at x=+4..+6 that is six deep (the bots' safe fall is three), floor beyond it. */
     private static Course gapCourse(GameTestHelper context, String name, int layer) {
         // The subject here is bridging by placing blocks; with parkour on the bot would simply jump this 3-wide gap (BaritoneCapabilityGameTests).
-        BaritoneCapabilityGameTests.installCaps(io.github.zoyluo.minecraftai.MinecraftAiConfig.BaritoneCaps.allOff());
-        Course c = Course.begin(context, name, layer, -2, 14, 3);
+        Course c = Course.begin(context, name, layer, -2, 14, 3, MinecraftAiConfig.BaritoneCaps.allOff());
         for (int dx = 4; dx <= 6; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 c.set(dx, -1, dz, Blocks.AIR);
@@ -617,9 +618,12 @@ public final class BaritoneNavigationGameTests {
         final int halfZ;
         final AIPlayerEntity bot;
         final IBaritone baritone;
+        /** Null for ordinary navigation tests; gap courses request all capabilities off at each admission. */
+        final MinecraftAiConfig.BaritoneCaps caps;
         private final Map<BlockPos, BlockState> before = new HashMap<>();
 
-        private Course(GameTestHelper context, String name, BlockPos feet, int fromX, int toX, int halfZ, AIPlayerEntity bot, IBaritone baritone) {
+        private Course(GameTestHelper context, String name, BlockPos feet, int fromX, int toX, int halfZ, AIPlayerEntity bot,
+                       IBaritone baritone, MinecraftAiConfig.BaritoneCaps caps) {
             this.context = context;
             this.world = context.getLevel();
             this.name = name;
@@ -629,9 +633,35 @@ public final class BaritoneNavigationGameTests {
             this.halfZ = halfZ;
             this.bot = bot;
             this.baritone = baritone;
+            this.caps = caps;
+        }
+
+        private static <T> T withCaps(MinecraftAiConfig.BaritoneCaps caps, Supplier<T> action) {
+            return caps == null ? action.get() : BaritoneCapabilityGameTests.withCaps(caps, action);
+        }
+
+        private static void runWithCaps(MinecraftAiConfig.BaritoneCaps caps, Runnable action) {
+            if (caps == null) {
+                action.run();
+            } else {
+                BaritoneCapabilityGameTests.withCaps(caps, action);
+            }
+        }
+
+        private <T> T withCaps(Supplier<T> action) {
+            return Course.withCaps(caps, action);
+        }
+
+        private void runWithCaps(Runnable action) {
+            Course.runWithCaps(caps, action);
         }
 
         static Course begin(GameTestHelper context, String name, int layer, int fromX, int toX, int halfZ) {
+            return begin(context, name, layer, fromX, toX, halfZ, null);
+        }
+
+        static Course begin(GameTestHelper context, String name, int layer, int fromX, int toX, int halfZ,
+                            MinecraftAiConfig.BaritoneCaps caps) {
             ServerLevel world = context.getLevel();
             BlockPos feet = context.absolutePos(new BlockPos(8, SLAB_BASE_Y + SLAB_STEP * layer, 8));
             int bulk = Block.UPDATE_CLIENTS;
@@ -652,8 +682,8 @@ public final class BaritoneNavigationGameTests {
                 }
             }
             AIPlayerEntity bot = BaritoneServerGameTests.spawn(context, name, feet);
-            IBaritone baritone = BaritoneRegistry.INSTANCE.get(bot);
-            return new Course(context, name, feet, fromX, toX, halfZ, bot, baritone);
+            IBaritone baritone = withCaps(caps, () -> BaritoneRegistry.INSTANCE.get(bot));
+            return new Course(context, name, feet, fromX, toX, halfZ, bot, baritone, caps);
         }
 
         void set(int dx, int dy, int dz, Block block) {
@@ -665,7 +695,7 @@ public final class BaritoneNavigationGameTests {
         }
 
         void goalNear(BlockPos goal, int radius, NavRoute.Options options) {
-            ObservedBaritoneTestRoutes.near(bot, goal, radius, options, "gametest_" + name);
+            runWithCaps(() -> ObservedBaritoneTestRoutes.near(bot, goal, radius, options, "gametest_" + name));
         }
 
         void goalBlock(BlockPos goal) {
@@ -673,15 +703,15 @@ public final class BaritoneNavigationGameTests {
         }
 
         void goalBlock(BlockPos goal, NavRoute.Options options) {
-            ObservedBaritoneTestRoutes.block(bot, goal, options, "gametest_" + name);
+            runWithCaps(() -> ObservedBaritoneTestRoutes.block(bot, goal, options, "gametest_" + name));
         }
 
         BaritoneNavigator.Admission admitGoalNear(BlockPos goal, int radius, NavRoute.Options options) {
-            return ObservedBaritoneTestRoutes.admitNear(bot, goal, radius, options, "gametest_" + name);
+            return withCaps(() -> ObservedBaritoneTestRoutes.admitNear(bot, goal, radius, options, "gametest_" + name));
         }
 
         BaritoneNavigator.Admission admitGoalBlock(BlockPos goal, NavRoute.Options options) {
-            return ObservedBaritoneTestRoutes.admitBlock(bot, goal, options, "gametest_" + name);
+            return withCaps(() -> ObservedBaritoneTestRoutes.admitBlock(bot, goal, options, "gametest_" + name));
         }
 
         /** Verifies that a deliberately hidden fixture goal fails at the production observation boundary. */
@@ -701,7 +731,6 @@ public final class BaritoneNavigationGameTests {
                 require(context, admission.accepted(), name + ": goal " + goal + " was refused as " + admission.failure());
             } finally {
                 AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
-                BaritoneCapabilityGameTests.restoreConfig();
             }
             require(context, BaritoneRegistry.INSTANCE.find(bot.getUUID()) == null,
                     "the admitted route's Baritone instance outlived the bot");
@@ -717,7 +746,6 @@ public final class BaritoneNavigationGameTests {
                 new Run(this).requireNoEdits();
             } finally {
                 AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
-                BaritoneCapabilityGameTests.restoreConfig();
             }
             require(context, BaritoneRegistry.INSTANCE.find(bot.getUUID()) == null,
                     "the refused route's Baritone instance outlived the bot");
@@ -781,7 +809,6 @@ public final class BaritoneNavigationGameTests {
                         check.accept(run);
                     } finally {
                         AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
-                        BaritoneCapabilityGameTests.restoreConfig();
                     }
                     require(context, BaritoneRegistry.INSTANCE.find(bot.getUUID()) == null, "the bot's Baritone instance outlived the bot");
                     context.succeed();
@@ -789,7 +816,6 @@ public final class BaritoneNavigationGameTests {
                     run.done = true;
                     String where = describe();
                     AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
-                    BaritoneCapabilityGameTests.restoreConfig();
                     require(context, false, name + ": still busy after " + limit + " ticks, " + where);
                 }
             });

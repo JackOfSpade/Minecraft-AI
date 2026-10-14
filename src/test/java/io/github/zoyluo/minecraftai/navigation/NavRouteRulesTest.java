@@ -84,6 +84,15 @@ final class NavRouteRulesTest {
     }
 
     @Test
+    void aPhysicalBoundaryRefusalKeepsItsTypedReason() {
+        NavRouteRules.Verdict refusal = NavRouteRules.verdict(
+                NavRoute.Progress.MOVEMENT_BOUNDARY_REFUSED, false, false, false);
+
+        assertEquals(NavOutcome.Status.FAILED, refusal.status());
+        assertEquals(NavRouteRules.MOVEMENT_BOUNDARY_REFUSED, refusal.reason());
+    }
+
+    @Test
     void outcomesAreLoggedUnderTheLegacyEventNames() {
         BlockPos goal = new BlockPos(1, 2, 3);
         assertEquals("path_complete", new NavOutcome(NavOutcome.Status.SUCCESS, "", "path_to", goal, 10).event());
@@ -105,5 +114,40 @@ final class NavRouteRulesTest {
         assertEquals(900, route.deadlineTick());
         assertEquals(3, route.radius());
         assertEquals(100, route.startTick());
+    }
+
+    @Test
+    void circularMovementBoundaryIncludesTheEdgeButRejectsDiagonalActionCornersAndLowFeet() {
+        BlockPos anchor = new BlockPos(0, 64, 0);
+        NavRoute.MovementBoundary boundary = new NavRoute.MovementBoundary(anchor, 8, 62);
+        NavRoute route = new NavRoute(NavRoute.Shape.BLOCK, anchor.east(7), 0,
+                NavRoute.Options.WALK_ONLY, "anchored_surface", 0,
+                Integer.MIN_VALUE, null, boundary);
+
+        assertTrue(boundary.allowsFeet(anchor.east(8)), "the inclusive cardinal edge is legal");
+        assertTrue(boundary.allowsFeet(anchor.offset(7, 0, -3)),
+                "the in-circle short retreat leg remains available");
+        assertFalse(boundary.allowsFeet(anchor.offset(8, 0, -1)),
+                "the first diagonal cell beyond the circular edge is outside the site");
+        assertFalse(boundary.allowsFeet(anchor.offset(0, -3, 0)),
+                "the vertical feet floor remains part of the same movement boundary");
+        assertTrue(boundary.allowsColumn(0, 0), "terrain support below legal feet stays in its allowed column");
+        assertEquals(boundary, route.movementBoundary(), "the route retains the immutable boundary object");
+        assertFalse(route.allowsMovementCell(8, 64, -1),
+                "pre-execution route validation rejects the outside diagonal hop");
+
+        // A diagonal can keep both feet endpoints in the circle while Baritone's adjacent
+        // corner/head action cell lies outside it. That exact footprint must be rejected before
+        // the executor's stateful per-click observation gate can create a retry loop.
+        BlockPos diagonalSource = anchor.east(8);
+        BlockPos diagonalDestination = anchor.offset(7, 0, 1);
+        BlockPos outsideCorner = anchor.offset(8, 0, 1);
+        assertTrue(route.allowsMovementCell(diagonalSource.getX(), diagonalSource.getY(), diagonalSource.getZ()));
+        assertTrue(route.allowsMovementCell(
+                diagonalDestination.getX(), diagonalDestination.getY(), diagonalDestination.getZ()));
+        assertFalse(route.allowsMovementActionCell(outsideCorner),
+                "an outside declared diagonal corner is not an admissible action cell");
+        assertTrue(route.allowsMovementActionCell(anchor.east(8).below(3)),
+                "support below the feet floor remains a legal action in an in-circle column");
     }
 }

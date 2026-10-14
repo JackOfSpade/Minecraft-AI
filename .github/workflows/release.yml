@@ -41,17 +41,45 @@ jobs:
       - name: Run unit tests, headless GameTests and production build
         run: ./gradlew --no-daemon --console=plain --stacktrace clean test runGameTest build
 
+      - name: Run PvP BOT wrapper unit tests, GameTest source compilation, and production build
+        working-directory: Minecraft-Spawn-Bots-Wrapper
+        run: ./gradlew --no-daemon --console=plain --stacktrace clean test compileGametestJava build
+
+      - name: Inspect release artifacts
+        run: CI_STATIC_CHECK_ARTIFACTS=all bash scripts/ci_static_check.sh
+
       - name: Collect release jars
         id: artifacts
         run: |
           set -euo pipefail
-          mod_jar="$(find build/libs -maxdepth 1 -type f -name '*.jar' \
-            ! -name '*-sources.jar' ! -name '*-dev.jar' -print -quit)"
-          [[ -n "$mod_jar" ]] || { echo 'no production jar found in build/libs' >&2; exit 1; }
-          sources_jar="$(find build/libs -maxdepth 1 -type f -name '*-sources.jar' -print -quit)"
+          release_jar() {
+            local directory="$1" prefix="$2"
+            local -a matches=()
+            mapfile -t matches < <(find "$directory" -maxdepth 1 -type f -name "${prefix}-*.jar" \
+              ! -name '*-sources.jar' ! -name '*-dev.jar' -print)
+            [[ "${#matches[@]}" -eq 1 ]] \
+              || { echo "expected exactly one production ${prefix} jar in ${directory}" >&2; exit 1; }
+            printf '%s\n' "${matches[0]}"
+          }
+          optional_sources_jar() {
+            local directory="$1" prefix="$2"
+            local -a matches=()
+            mapfile -t matches < <(find "$directory" -maxdepth 1 -type f -name "${prefix}-*-sources.jar" -print)
+            [[ "${#matches[@]}" -le 1 ]] \
+              || { echo "expected at most one ${prefix} sources jar in ${directory}" >&2; exit 1; }
+            if [[ "${#matches[@]}" -eq 1 ]]; then
+              printf '%s\n' "${matches[0]}"
+            fi
+          }
+          mod_jar="$(release_jar build/libs Minecraft-AI)"
+          sources_jar="$(optional_sources_jar build/libs Minecraft-AI)"
+          wrapper_jar="$(release_jar Minecraft-Spawn-Bots-Wrapper/build/libs pvpbot-inhabitants)"
+          wrapper_sources_jar="$(optional_sources_jar Minecraft-Spawn-Bots-Wrapper/build/libs pvpbot-inhabitants)"
           {
             echo "mod_jar=$mod_jar"
             echo "sources_jar=$sources_jar"
+            echo "wrapper_jar=$wrapper_jar"
+            echo "wrapper_sources_jar=$wrapper_sources_jar"
           } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
@@ -59,9 +87,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          assets=("${{ steps.artifacts.outputs.mod_jar }}")
+          assets=("${{ steps.artifacts.outputs.mod_jar }}" "${{ steps.artifacts.outputs.wrapper_jar }}")
           if [[ -n "${{ steps.artifacts.outputs.sources_jar }}" ]]; then
             assets+=("${{ steps.artifacts.outputs.sources_jar }}")
+          fi
+          if [[ -n "${{ steps.artifacts.outputs.wrapper_sources_jar }}" ]]; then
+            assets+=("${{ steps.artifacts.outputs.wrapper_sources_jar }}")
           fi
           gh release create "${{ github.ref_name }}" \
             "${assets[@]}" \

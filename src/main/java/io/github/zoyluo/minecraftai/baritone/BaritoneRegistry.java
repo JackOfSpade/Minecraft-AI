@@ -9,6 +9,8 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.navigation.NavEngineSelector;
 import io.github.zoyluo.minecraftai.navigation.NavRoute;
+import io.github.zoyluo.minecraftai.navigation.MovementBoundarySweep;
+import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
 import io.github.zoyluo.minecraftai.task.NavSafetyNet;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +57,28 @@ public final class BaritoneRegistry {
         /** Baritone owns the bot's movement inputs right now (set and cleared by {@link BaritoneDriver} and {@link #preempt}). */
         volatile boolean driven;
         /**
+         * The last real directional keys that a running executor supplied.  A natural follow-route
+         * completion can be immediately replaced at END_SERVER_TICK; its fresh asynchronous
+         * calculation has no executor for one bot tick, so the bridge may reuse this one bounded
+         * input and gait only for that exact handoff (see {@link BotInputBridge}).
+         */
+        float lastBridgeForward;
+        float lastBridgeStrafing;
+        float lastBridgeYaw;
+        boolean lastBridgeSprinting;
+        /** Exact route that actually supplied the saved executor input; prevents a no-executor route reissuing it. */
+        NavRoute lastBridgeRoute;
+        boolean hasLastBridgeDirection;
+        /** One-use continuation retained only across a natural FollowTask route release. */
+        float followHandoffForward;
+        float followHandoffStrafing;
+        float followHandoffYaw;
+        boolean followHandoffSprinting;
+        /** Feet Y at the natural release; a receipt may never bridge a climb, descent, or fall. */
+        int followHandoffFeetY = Integer.MIN_VALUE;
+        boolean followHandoffAvailable;
+        int followHandoffExpiresAt = Integer.MIN_VALUE;
+        /**
          * The route Baritone is executing may go through water (set by the navigator per request, or by a caller that drives
          * Baritone directly): while it is set and Baritone drives the bot, the drowning safety net leases the bot to Baritone
          * (see {@code NavSafetyNet#renewBaritoneWater}), and the lease ends with the drive.
@@ -62,6 +86,16 @@ public final class BaritoneRegistry {
         volatile boolean waterAllowed;
         /** The route whose immutable observation boundary is currently exposed to this instance. */
         volatile NavRoute observedRoute;
+        /**
+         * The last active local-site boundary, retained for the tick that releases Baritone's
+         * keys and until a collision probe proves the body is supported. A route can be
+         * cancelled before vanilla consumes the previous tick's velocity, so clearing
+         * {@link #observedRoute} alone is too early for a physical containment guard.
+         */
+        volatile NavRoute.MovementBoundary physicsMovementBoundary;
+        int physicsBoundaryReleaseUntil = Integer.MIN_VALUE;
+        /** Latched by AIPlayerEntity.move and consumed after physics, never while Entity.move is re-entrant. */
+        String physicsMovementBoundaryFailure;
         /**
          * A route was stopped because its terrain authority disappeared, rather than because
          * Baritone merely ended its path. Kept until the owning ActionPack records the typed
@@ -173,8 +207,12 @@ public final class BaritoneRegistry {
     public void setObservationFence(AIPlayerEntity bot, ObservedNavigationFence fence, NavRoute route) {
         get(bot);
         Entry entry = entries.get(bot.getUUID());
-        entry.context.setObservationFence(fence, route != null && route.shape() == NavRoute.Shape.OWNER_FOLLOW);
+        entry.context.setObservationFence(fence, route != null && route.shape() == NavRoute.Shape.OWNER_FOLLOW,
+                route == null ? null : route.movementBoundary());
         entry.observedRoute = route;
+        entry.physicsMovementBoundary = route == null ? null : route.movementBoundary();
+        entry.physicsBoundaryReleaseUntil = Integer.MIN_VALUE;
+        entry.physicsMovementBoundaryFailure = null;
         entry.observationRevocationReason = null;
     }
 
@@ -197,8 +235,10 @@ public final class BaritoneRegistry {
         if (after == before) {
             return;
         }
-        entry.context.setObservationFence(after, entry.observedRoute != null
-                && entry.observedRoute.shape() == NavRoute.Shape.OWNER_FOLLOW);
+        NavRoute route = entry.observedRoute;
+        entry.context.setObservationFence(after, route != null
+                && route.shape() == NavRoute.Shape.OWNER_FOLLOW,
+                route == null ? null : route.movementBoundary());
         BotLog.path(bot, "nav_observed_placement_result", "pos", pos, "generation", after.generation());
     }
 
@@ -229,6 +269,7 @@ public final class BaritoneRegistry {
     public void clearObservationFence(AIPlayerEntity bot) {
         Entry entry = entries.get(bot.getUUID());
         if (entry != null) {
+            retainMovementBoundaryForReleasedPhysics(entry, bot);
             entry.context.clearObservationFence();
             entry.observedRoute = null;
         }
@@ -268,9 +309,71 @@ public final class BaritoneRegistry {
     public void clearObservationFence(UUID botId) {
         Entry entry = entries.get(botId);
         if (entry != null) {
+            retainMovementBoundaryForReleasedPhysics(entry, entry.bot);
             entry.context.clearObservationFence();
             entry.observedRoute = null;
         }
+    }
+
+    /**
+     * The boundary that must constrain the entity's next physical {@code move} call. Active
+     * routes hold it indefinitely; a released route holds it through the input/velocity seam
+     * and until its current AABB is collision-supported, so a stale horizontal shove or a fall
+     * cannot escape its promised site after the navigator has already cleared its metadata.
+     */
+    public NavRoute.MovementBoundary movementBoundaryForPhysics(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        if (entry == null) {
+            return null;
+        }
+        NavRoute active = entry.observedRoute;
+        if (active != null && active.movementBoundary() != null) {
+            return active.movementBoundary();
+        }
+        NavRoute.MovementBoundary retained = entry.physicsMovementBoundary;
+        if (retained == null) {
+            return null;
+        }
+        int tick = bot.getServer().getTickCount();
+        // `onGround` belongs to the previous move. A body can leave its last support
+        // horizontally while that flag remains true, so clear the release backstop only after
+        // an immediate collision probe proves its present AABB is fully supported.
+        if (tick <= entry.physicsBoundaryReleaseUntil || !MovementBoundarySweep.hasCollisionSupport(bot)) {
+            return retained;
+        }
+        entry.physicsMovementBoundary = null;
+        entry.physicsBoundaryReleaseUntil = Integer.MIN_VALUE;
+        entry.physicsMovementBoundaryFailure = null;
+        return null;
+    }
+
+    /** Latches a physical boundary refusal without mutating the path executor during Entity.move. */
+    public void noteMovementBoundaryPhysicsRefusal(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        if (entry != null && entry.observedRoute != null && entry.observedRoute.movementBoundary() != null) {
+            entry.physicsMovementBoundaryFailure = NavRouteRules.MOVEMENT_BOUNDARY_REFUSED;
+        }
+    }
+
+    /** Clears Baritone's held keys after a physical guard clipped the move, without cancelling from inside Entity.move. */
+    public void clearMovementBoundaryInputs(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        if (entry == null) {
+            return;
+        }
+        entry.baritone.getInputOverrideHandler().clearAllKeys();
+        BotInputBridge.release(bot);
+    }
+
+    /** Driver-only: returns and clears an Entity.move violation after physics has completed. */
+    String consumeMovementBoundaryPhysicsFailure(AIPlayerEntity bot) {
+        Entry entry = entries.get(bot.getUUID());
+        if (entry == null) {
+            return null;
+        }
+        String failure = entry.physicsMovementBoundaryFailure;
+        entry.physicsMovementBoundaryFailure = null;
+        return failure;
     }
 
     /** Active route metadata for the server-thread observation refresh boundary. */
@@ -311,14 +414,50 @@ public final class BaritoneRegistry {
      */
     public void preempt(AIPlayerEntity bot, String why) {
         Entry entry = entries.get(bot.getUUID());
-        if (entry == null || !(entry.driven || BaritoneDriver.busy(entry.baritone))) {
+        if (entry == null) {
             return;
         }
         if (hopToServerThread(bot, () -> preempt(bot, why))) {
             return;
         }
+        if (!(entry.driven || BaritoneDriver.busy(entry.baritone))) {
+            // An ActionPack claim can arrive in the one-tick natural-release gap, after its
+            // route has already settled. It must revoke the receipt even though there is no
+            // live Baritone process left to halt.
+            BotInputBridge.clearFollowInputContinuity(entry);
+            return;
+        }
         halt(entry, bot);
         BotLog.lifecycle(bot, "baritone_preempted", "by", why);
+    }
+
+    /**
+     * Synchronously removes a predecessor before a successfully admitted route publishes any of
+     * its authority. Unlike {@link #preempt}, this also runs in the narrow hand-off window where
+     * the old process has a live executor but has not marked the entry driven yet. The caller must
+     * immediately install the replacement or reset the instance; a canceled predecessor is never
+     * resurrected from stale metadata.
+     */
+    void cancelForReplacement(AIPlayerEntity bot, String why) {
+        Entry entry = entries.get(bot.getUUID());
+        if (entry == null) {
+            return;
+        }
+        if (hopToServerThread(bot, () -> cancelForReplacement(bot, why))) {
+            return;
+        }
+        // A just-finished FollowTask route deliberately left one actual executor direction for
+        // its successor's calculation tick.  An accepted replacement still must cancel every
+        // old process and revoke its observation authority, but it must not erase that one-use
+        // receipt before the newly admitted route gets to consume it.  The receipt is already
+        // scoped to an idle predecessor and expires on the next server tick; all other
+        // cancellations retain the usual clear-everything behaviour.
+        boolean retainNaturalFollowHandoff = entry.followHandoffAvailable
+                && !entry.driven
+                && !BaritoneDriver.busy(entry.baritone)
+                && bot.getServer().getTickCount() <= entry.followHandoffExpiresAt;
+        halt(entry, bot, retainNaturalFollowHandoff);
+        BotLog.lifecycle(bot, "baritone_replacement_preempted", "by", why);
     }
 
     /** Stops whatever Baritone is doing for the bot but keeps its instance. Server thread only; no-op if it has none. */
@@ -417,10 +556,44 @@ public final class BaritoneRegistry {
         }
     }
 
+    /**
+     * Keeps an anchored route's body fence alive through the release seam. Horizontal momentum
+     * is voluntary route motion and must not coast across the edge after forced keys are lifted;
+     * vertical motion remains guarded until the body lands so the feet floor is not skipped.
+     */
+    private static void retainMovementBoundaryForReleasedPhysics(Entry entry, AIPlayerEntity bot) {
+        NavRoute route = entry.observedRoute;
+        NavRoute.MovementBoundary boundary = route == null ? entry.physicsMovementBoundary : route.movementBoundary();
+        if (boundary == null || bot == null) {
+            return;
+        }
+        entry.physicsMovementBoundary = boundary;
+        entry.physicsBoundaryReleaseUntil = bot.getServer().getTickCount() + 1;
+        entry.physicsMovementBoundaryFailure = null;
+        // Entity.move will still sweep any vertical fall. Killing only the horizontal component
+        // avoids carrying a prior Baritone sprint into a now-cleared route while preserving
+        // vanilla fall/landing behavior until the boundary guard can decide it is safe.
+        bot.setDeltaMovement(0.0D, bot.getDeltaMovement().y, 0.0D);
+    }
+
     /** Cancels everything Baritone is doing and lets go of the bot: no more forced inputs, no driving. */
     private static void halt(Entry entry, AIPlayerEntity bot) {
+        halt(entry, bot, false);
+    }
+
+    /**
+     * Stops a route's process and authority. An accepted replacement may retain only the
+     * one-tick natural FollowTask handoff, never an arbitrary old input or route state.
+     */
+    private static void halt(Entry entry, AIPlayerEntity bot, boolean retainNaturalFollowHandoff) {
         boolean wasDriven = entry.driven;
+        retainMovementBoundaryForReleasedPhysics(entry, bot);
         entry.driven = false;
+        // A natural completion is the sole handoff that may retain one key. Any explicit
+        // cancellation/reset invalidates it even when the successor has not driven yet.
+        if (!retainNaturalFollowHandoff) {
+            BotInputBridge.clearFollowInputContinuity(entry);
+        }
         entry.waterAllowed = false;
         entry.context.setWaterAllowed(false);
         entry.observedRoute = null;

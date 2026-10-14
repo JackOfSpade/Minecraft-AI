@@ -1,8 +1,18 @@
 # Deploying to a local Minecraft profile
 
-`scripts/deploy_profile.sh` builds the mod and installs it into a launcher profile (default
+`scripts/deploy_profile.sh` builds the Minecraft-AI mod and its bundled PvP BOT wrapper, then installs both into a launcher profile (default
 `%APPDATA%/.minecraft/profiles/Minecraft-AI-1.21.11`), applies the LLM settings and makes sure logging
-is on. Run it from Git Bash with the game closed:
+is on. The wrapper is an addon, not a copy of upstream PvP BOT: install a compatible upstream **PvP BOT**
+mod first. Before it modifies configuration or either owned jar, the deployer verifies that the profile
+contains a Fabric manifest with the required `pvp_bot` id and has no renamed jar that declares the owned
+`minecraftai` or `pvpbot_inhabitants` id; it never downloads or replaces the third-party mod. A renamed
+old owned jar must be backed up, removed, or restored to a managed filename before deploying, so the new
+release cannot leave Fabric with duplicate mod IDs. Run it from Git Bash with the game closed. It stages
+new jars outside `mods`, moves the complete prior owned-jar set into a transaction backup, and restores
+that exact set if either publish step fails. The built-in disposable self-test covers both a staging failure
+and a wrapper failure after the Minecraft-AI jar has published. If a filesystem error also prevents
+rollback, it preserves the recovery backup and tells you not to launch Minecraft rather than deleting
+recoverable jars to hide the failure:
 
 ```bash
 bash scripts/deploy_profile.sh              # build + install + apply .env settings
@@ -22,7 +32,9 @@ Google's `generativelanguage.googleapis.com` host. In `config/minecraftai.json`:
 * The section used to be called `deepseek`. That name is still read (and migrated by the deploy
   script); if both exist, `llm` wins.
 * The API key can also come from the environment: `MINECRAFTAI_LLM_API_KEY`, or the legacy
-  `DEEPSEEK_API_KEY`. The environment overrides the file.
+  `DEEPSEEK_API_KEY`. The game gives the current name priority. For deployment, either may also
+  be placed in the local `.env`; the script migrates the resolved value into the private profile
+  config without printing it.
 * The shipped defaults still point at DeepSeek (`https://api.deepseek.com`, `deepseek-v4-flash`).
 * When the provider is overloaded or unreachable (HTTP 408/429/5xx, a timeout, a dropped connection), the
   bot's planning call is retried with exponential backoff and jitter for up to five minutes, honouring
@@ -41,16 +53,17 @@ Google's `generativelanguage.googleapis.com` host. In `config/minecraftai.json`:
   The chat-recipient router uses the same retry (a line the player replaced meanwhile is dropped), and the
   ambient chatter makes one attempt per line. Nothing in the game sleeps and retries inside the HTTP client any
   more, so `llm.retryCount` / `retryBackoffMs` are accepted for old config files but no longer used.
-* `deploy_profile.sh`'s own `.env` parsing separately accepts the pre-rename interim names
-  `AIBOT_LLM_API_KEY` / `AIBOT_LLM_BASE_URL` / `AIBOT_LLM_MODEL` as a per-variable fallback (in the
-  file or the environment) when the current `MINECRAFTAI_LLM_*` name is absent; it prints a warning
-  naming whichever legacy names it used. `MINECRAFTAI_LLM_*` always wins when both are present.
+* `deploy_profile.sh`'s own `.env` parsing recognizes the legacy `DEEPSEEK_API_KEY` before the
+  interim `AIBOT_LLM_API_KEY` / `AIBOT_LLM_BASE_URL` / `AIBOT_LLM_MODEL` per-variable fallbacks
+  (in the file or environment). It prints a warning naming whichever legacy names it used.
+  `MINECRAFTAI_LLM_*` always wins when both are present.
 
 ## Secrets stay out of git
 
 Put the values in a local `.env` (copy `.env.example`). `.env` is gitignored; the game never reads it.
-The deploy script parses it (it is never executed), writes the values into the profile's private
-`config/minecraftai.json`, and never prints the key. Do not commit `minecraftai.json` from a profile either.
+The deploy script parses it (it is never executed), stages and validates the profile replacement,
+then atomically writes the values into the private `config/minecraftai.json`; it never prints the
+key. Do not commit `minecraftai.json` from a profile either.
 
 ## Logging
 

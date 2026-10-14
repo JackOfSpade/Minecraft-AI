@@ -1768,11 +1768,23 @@ public final class OreDigPickupGameTests {
         int fillerBaseline = InventoryAction.countItem(bot, Items.COBBLESTONE);
 
         ItemEntity drop = new ItemEntity(world,
-                landing.getX() + 0.5D, landing.getY() + 3.1D, landing.getZ() + 0.5D,
+                // A vanilla ore drop may launch one cell above its source before it settles.
+                // Keep this fixture inside that factual launch envelope: farther synthetic
+                // items are intentionally not bound to an existing pickup ledger, because
+                // they could belong to another miner.
+                landing.getX() + 0.5D, landing.getY() + 1.1D, landing.getZ() + 0.5D,
                 new ItemStack(Items.DIAMOND));
         drop.setDeltaMovement(Vec3.ZERO);
         drop.setNoGravity(true);
+        // ItemEntity's construction-time onGround bit is not a collision proof.  Pin the
+        // synthetic drop to the state the production recovery path must treat as unsettled so
+        // this fixture cannot accidentally exercise the ordinary settled-drop route instead.
+        drop.setOnGround(false);
         require(context, world.addFreshEntity(drop), "failed to spawn airborne diamond drop");
+        require(context, ObservableWorldQuery.canObserveEntity(bot, drop),
+                "fixture hid the airborne drop instead of testing its physical-settlement gate");
+        require(context, !HarvestCore.isDropPhysicallySupported(bot, drop),
+                "fixture accidentally gave the airborne drop physical support");
 
         Map<String, String> checkpoint = new LinkedHashMap<>(openCheckpoint(start, 1));
         checkpoint.put("pending_pickup_pos", encode(landing));

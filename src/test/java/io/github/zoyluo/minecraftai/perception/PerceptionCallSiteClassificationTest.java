@@ -62,7 +62,7 @@ class PerceptionCallSiteClassificationTest {
         m.put("task/CreeperDefenseTask.java", Counts.of(1, 0, 1));             // a creeper is a risk when noticed AND on a physical line (a blast's exposure rays are collider rays)
         m.put("task/EmergencyShelterTask.java", Counts.of(2, 1, 2));           // physical: melee strike from the shelter
         m.put("task/EvadeTask.java", Counts.of(3, 1, 1));                      // object: the OWNER's direction (a friend), plain sight; physical: the source must still press on the bot
-        m.put("task/FollowEscort.java", Counts.of(1, 0, 0));
+        m.put("task/FollowEscort.java", Counts.of(1, 0, 1));                  // an escort target is noticed and must also have the bot's collider line before the in-place escort can swing
         m.put("task/HostileBotLedger.java", Counts.of(0, 0, 1));             // a marked foreign bot gets the immediate defensive handoff only across a physical line
         m.put("manager/AIPlayerManager.java", Counts.of(0, 0, 1));           // a recall/revive is reported as owner-adjacent only after the owner's collider line can see the companion
         m.put("perception/PerceptionCollector.java", Counts.of(1, 1, 0));      // what the LLM is told it sees: creatures noticed; dropped items observed

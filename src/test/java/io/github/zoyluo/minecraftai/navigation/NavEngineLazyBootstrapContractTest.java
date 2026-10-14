@@ -150,7 +150,18 @@ final class NavEngineLazyBootstrapContractTest {
                 "an in-flight WalkedStep must be yielded before Baritone is admitted as the sole input writer");
         // A physical action cancels the recorded Baritone route through the shared claim.
         assertTrue(pack.contains("private void claim(String why) {\n        releaseBaritone(why);"));
-        assertTrue(pack.contains("cancelBaritoneRoute(\"stop_navigation\")"), "stopNavigation ends a Baritone route too");
+        int stopNavigation = pack.indexOf("public void stopNavigation()");
+        int stopAll = pack.indexOf("public void stopAll()", stopNavigation);
+        String stop = pack.substring(stopNavigation, stopAll);
+        assertTrue(stop.contains("releaseBaritone(\"stop_navigation\");"),
+                "stopNavigation releases an active route and any settled direct-Baritone handoff");
+
+        int release = pack.indexOf("private void releaseBaritone(String why)");
+        int yieldToBaritone = pack.indexOf("public void yieldToBaritone()", release);
+        String releaseBody = pack.substring(release, yieldToBaritone);
+        assertTrue(releaseBody.contains("route != null && cancelBaritoneRoute(why)")
+                        && releaseBody.contains("BaritoneRegistry.INSTANCE.preempt(player, why)"),
+                "the shared release records a live route cancellation or preempts settled direct Baritone work");
     }
 
     @Test

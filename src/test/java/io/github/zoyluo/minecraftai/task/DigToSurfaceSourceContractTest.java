@@ -23,6 +23,12 @@ final class DigToSurfaceSourceContractTest {
         assertTrue(digOut.contains("findGravityClearanceStance"));
         assertTrue(digOut.contains("safeGravityStance"));
         assertTrue(digOut.contains("FallingBlock"));
+        int directionLoop = digOut.indexOf("for (Direction direction : order)");
+        int gravityFallback = digOut.indexOf("if (requireSurface && gravityMove != null && gravityRefusal != null", directionLoop);
+        assertTrue(directionLoop >= 0 && gravityFallback > directionLoop,
+                "a falling column is cleared only after the ordinary turn order found no safe rise");
+        assertTrue(digOut.contains("if (requireSurface && gravityMove != null && gravityRefusal != null"),
+                "only an explicit surface request may clear a loose column; automatic dark-trap recovery turns away");
         assertTrue(digOut.contains("AutomaticLighting.tryPlaceTorchAtFeet"));
         assertTrue(digOut.contains("TORCH_RISE_INTERVAL = 6"));
         assertTrue(registry.contains("register(\"dig_to_surface\""));

@@ -145,9 +145,10 @@ a walk, an aggro'd zombie did not make the follower run.
 it keeps following: candidates are what `CombatCore.hostileTo` calls hostile (a MARKED foreign bot, never a SUSPECT one) within 4.5 blocks that
 the bot's own eyes see and melee is allowed against (no creeper). A swing is made only when the cooldown is full, no item is in use
 and the reach is legal (`strikeIfReady` turns the bot toward its target first, and that turn affects the next input tick, so it is not
-called on other ticks). The weapon is picked when a candidate is near, at most every 40 ticks. `DangerWatcher` does not pause a follow for an ordinary hostile
-(`behaviour.follow.escortOnly`): it still hands over for low health, a creeper (CreeperDefense),
-a hostile that could kill the bot in two hits, lava, drowning and falling. Regroup is skipped while following. A `FollowTask` with a hostile
+called on other ticks). The weapon is picked when a candidate is near, at most every 40 ticks. `DangerWatcher` does not pause a follow for an ordinary melee hostile
+(`behaviour.follow.escortOnly`) merely because it is beyond melee reach or behind a wall: ordinary ranged mobs stay with follow's reactive shield, while a marked foreign
+player actively presenting a ranged weapon, an evade-only/boss threat, low health, a creeper (CreeperDefense), a hostile that could kill the bot in two hits, lava,
+drowning and falling still hand over. Regroup is skipped while following. A `FollowTask` with a hostile
 within 6 blocks is TaskManager-critical (it ticks even under a degraded TPS).
 
 ## Eating at the sprint limit (R6)

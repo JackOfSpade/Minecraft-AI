@@ -6,8 +6,10 @@ import io.github.zoyluo.minecraftai.log.LogCategory;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -23,6 +25,10 @@ import java.util.function.LongSupplier;
  * (a new player message, an intent cancel) is dropped instead of being sent.</p>
  *
  * <p>Nothing here knows the per-instruction model-call budget: a retry is not another planner turn.</p>
+ *
+ * <p>If the runtime stops while a delayed retry is waiting, its worker can reject the resumed
+ * attempt. That is a terminal cancellation: callbacks belong to the retired runtime, so the
+ * delayed-executor thread drops the retry rather than leaking an uncaught rejection.</p>
  */
 final class LlmRetryRunner {
     /** What a request that stopped being wanted reports as its final failure; the caller discards it as stale. */
@@ -86,7 +92,8 @@ final class LlmRetryRunner {
                  Consumer<T> onSuccess,
                  Consumer<LlmApiException> onFailure) {
         long started = clockMillis.getAsLong();
-        worker.execute(() -> tryOnce(botName, attempt, stillWanted, onWaiting, onSuccess, onFailure, started, 1, false));
+        executeOnWorker(() -> tryOnce(botName, attempt, stillWanted, onWaiting, onSuccess, onFailure,
+                started, 1, false));
     }
 
     private <T> void tryOnce(String botName,
@@ -148,9 +155,9 @@ final class LlmRetryRunner {
                 }
             }
             boolean reported = waitingReported || report;
-            scheduler.schedule(delay.getAsLong(), () -> worker.execute(() ->
-                    tryOnce(botName, attempt, stillWanted, onWaiting, onSuccess, onFailure, started,
-                            attemptNumber + 1, reported)));
+            scheduler.schedule(delay.getAsLong(), () -> executeOnWorker(() ->
+                    tryOnce(botName, attempt, stillWanted, onWaiting, onSuccess, onFailure,
+                            started, attemptNumber + 1, reported)));
             return;
         }
         if (attemptNumber > 1) {
@@ -160,6 +167,28 @@ final class LlmRetryRunner {
                     "elapsed_ms", clockMillis.getAsLong() - started);
         }
         onSuccess.accept(result);
+    }
+
+    /**
+     * The runtime retires its worker before the delayed-executor callbacks created by
+     * {@link #standard(Executor)} drain. A rejection at that boundary means the entire runtime
+     * that owns this request has gone away, so neither a retry nor a callback remains meaningful.
+     */
+    private void executeOnWorker(Runnable task) {
+        AtomicBoolean taskStarted = new AtomicBoolean();
+        try {
+            worker.execute(() -> {
+                taskStarted.set(true);
+                task.run();
+            });
+        } catch (RejectedExecutionException rejected) {
+            if (taskStarted.get()) {
+                // Direct executors can propagate an exception thrown *by* the task; that is not
+                // a rejected submission and must retain its normal failure behavior.
+                throw rejected;
+            }
+            // Shutdown cancellation: never let a delayed executor report this as an uncaught error.
+        }
     }
 
     private static String abbreviate(String message) {

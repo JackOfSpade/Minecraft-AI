@@ -20,6 +20,19 @@ final class FollowPortalSourceContractTest {
         assertTrue(portalAttempt >= 0 && portalAttempt < ordinaryCrossDimensionWait,
                 "the portal handoff must run before the ordinary cross-dimension wait");
         assertTrue(follow.contains("rememberPortalDeparture(target, bot.level())"));
+        assertTrue(follow.contains("void observePortalDeparture(AIPlayerEntity bot)")
+                        && follow.contains("!isVerifiedOwner(bot, target)")
+                        && follow.contains("target.level() != bot.level()"),
+                "the START_WORLD_TICK portal observer records only a verified owner while both players still share the source level");
+
+        String taskManager = Files.readString(MAIN.resolve("task/TaskManager.java"));
+        assertTrue(taskManager.contains("public void observePortalDepartures(ServerLevel level)")
+                        && taskManager.contains("follow::observePortalDeparture"),
+                "active follow tasks must be observed before player dimension transfer, not only at END_SERVER_TICK");
+        String mod = Files.readString(MAIN.resolve("MinecraftAiMod.java"));
+        assertTrue(mod.contains("ServerTickEvents.START_WORLD_TICK.register(level ->")
+                        && mod.contains("TaskManager.INSTANCE.observePortalDepartures(level)"),
+                "the portal observer must run in Fabric's pre-player world-tick phase");
         assertTrue(follow.contains("Blocks.NETHER_PORTAL") && follow.contains("Blocks.END_PORTAL"));
         assertTrue(follow.contains("source.dimension() == Level.OVERWORLD && destination.dimension() == Level.END")
                         && follow.contains("source.dimension() == Level.END && destination.dimension() == Level.OVERWORLD"),

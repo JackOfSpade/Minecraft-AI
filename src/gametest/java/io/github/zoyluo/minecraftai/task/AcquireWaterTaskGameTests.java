@@ -14,6 +14,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -535,8 +536,10 @@ public final class AcquireWaterTaskGameTests {
     @GameTest(environment = "minecraftai-gametest:acquire_water_task_game_tests_dry_overhang_footing_uses_its_observable_sky_edge_as_surface_exit", maxTicks = 40)
     public void dryOverhangFootingUsesItsObservableSkyEdgeAsSurfaceExit(GameTestHelper context) {
         var world = context.getLevel();
-        // Keep every mutated cell inside the tiny EMPTY_STRUCTURE footprint. A far local offset
-        // can overlap a concurrently placed GameTest structure and make the roof nondeterministic.
+        // The small empty environment is intentionally re-used by tests with much larger scenes.
+        // The sweeper keeps the next structure's bounds while it restores the preceding scene, so
+        // a prior roof can legitimately remain above this tiny footprint for one batch. Build the
+        // factual sky edge ourselves instead of assuming an unmodified vertical column.
         BlockPos exit = context.absolutePos(new BlockPos(1, 4, 1));
         BlockPos skyEdge = exit.east();
         BlockPos surfaceAnchor = exit.west(8).below(3);
@@ -548,8 +551,7 @@ public final class AcquireWaterTaskGameTests {
         // adjacent dry edge is a factual, observable route onto the open surface.
         world.setBlock(exit.above(2), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
         world.setBlock(skyEdge.below(), Blocks.STONE.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(skyEdge, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        world.setBlock(skyEdge.above(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        clearSkyColumn(world, skyEdge);
 
         String name = "WaterOverhangExitGT";
         AIPlayerEntity bot = AIPlayerManager.INSTANCE.spawn(
@@ -566,6 +568,11 @@ public final class AcquireWaterTaskGameTests {
         // Sky light/heightmap propagation is ticked. Assert the roof only after the world has had
         // time to publish the block update; synchronous checks are order-dependent in full suites.
         context.runAtTickTime(2, () -> {
+            BlockPos skyBlocker = firstSkyColumnBlocker(world, skyEdge);
+            require(context, skyBlocker == null,
+                    "fixture outward sky column retained "
+                            + (skyBlocker == null ? "no blocker" : skyBlocker.toShortString()
+                            + "=" + world.getBlockState(skyBlocker)));
             require(context, !world.canSeeSky(exit),
                     "fixture footing unexpectedly sees sky");
             require(context, world.canSeeSky(skyEdge),
@@ -1747,6 +1754,24 @@ public final class AcquireWaterTaskGameTests {
                 }
             }
         }
+    }
+
+    /** Opens one complete column so a sky-dependent fixture cannot inherit a retained prior scene. */
+    private static void clearSkyColumn(ServerLevel world, BlockPos base) {
+        for (int y = base.getY(), top = world.getMinY() + world.getHeight(); y < top; y++) {
+            world.setBlock(new BlockPos(base.getX(), y, base.getZ()),
+                    Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        }
+    }
+
+    private static BlockPos firstSkyColumnBlocker(ServerLevel world, BlockPos base) {
+        for (int y = base.getY(), top = world.getMinY() + world.getHeight(); y < top; y++) {
+            BlockPos cell = new BlockPos(base.getX(), y, base.getZ());
+            if (!world.getBlockState(cell).isAir()) {
+                return cell;
+            }
+        }
+        return null;
     }
 
     private static void require(GameTestHelper context, boolean condition, String message) {

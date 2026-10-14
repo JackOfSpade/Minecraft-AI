@@ -40,6 +40,16 @@ class DescendTraversalToolGateSourceContractTest {
     }
 
     @Test
+    void aCrossedDetourCannotImmediatelyBecomeTheReverseStairRoute() throws IOException {
+        String source = Files.readString(SOURCE);
+
+        assertTrue(source.contains("DetourEdge forwardEdge = new DetourEdge(feet, ahead);"));
+        assertTrue(source.contains("traversedDetourEdges.contains(forwardEdge)")
+                        && source.contains("traversedDetourEdges.contains(new DetourEdge(ahead, feet))"),
+                "the ordinary descent chooser must reject a just-crossed detour in either orientation");
+    }
+
+    @Test
     void failedMiningAttemptsAreNeverRetriedAsTheSameStairOrDetour() throws IOException {
         String source = Files.readString(SOURCE);
 

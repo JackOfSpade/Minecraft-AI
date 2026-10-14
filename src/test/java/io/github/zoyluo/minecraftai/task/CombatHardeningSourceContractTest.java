@@ -111,9 +111,10 @@ final class CombatHardeningSourceContractTest {
         String watcher = read("task/DangerWatcher.java");
         assertTrue(watcher.contains("PvpBotCombatBrain.INSTANCE.tick(server, bot, aggressor)"),
                 "a factual hostile player must hand combat to the PvP BOT brain immediately");
-        assertTrue(watcher.contains("pvpPlayerAggressor = aggroTarget")
+        assertTrue(watcher.contains("List<LivingEntity> pvpPlayerAggressors = selectPvpPlayerAggressors")
+                        && watcher.contains("selectPvpBridgeAggressor(")
                         && watcher.contains("isPvpBotPlayerAggressor"),
-                "ordinary hostile mobs must go directly to deterministic combat instead of pausing follow for PvP BOT");
+                "only admitted marked players may enter PvP BOT; ordinary hostile mobs stay on deterministic combat");
         int bridgeAttempt = watcher.indexOf("PvpBotCombatBrain.INSTANCE.tick(server, bot, aggressor)");
         int bridgePreempt = watcher.indexOf("TaskManager.INSTANCE.pauseFor(bot, \"pvp_bot_combat\")");
         int bridgeFallback = watcher.indexOf("pvpAggressors.remove(bot.getUUID());", bridgeAttempt);
@@ -148,14 +149,112 @@ final class CombatHardeningSourceContractTest {
     }
 
     @Test
-    void vanillaAggroMustHaveMossOwnOmnidirectionalPhysicalLineBeforeItCanDispatchCombat() throws IOException {
+    void escortFollowKeepsAnOrdinaryFactualAggressorOutOfBothCombatHandoffs() throws IOException {
         String watcher = read("task/DangerWatcher.java");
-        int aggro = watcher.indexOf("Optional<LivingEntity> aggroTarget = immediateAggressor(bot)");
+        int keep = watcher.indexOf("boolean followKeepsCurrentThreat = threat");
+        int bridge = watcher.indexOf("PvpBotCombatBrain.INSTANCE.available()", keep);
+        int bridgeEnd = watcher.indexOf("        } else if (PvpBotCombatBrain.INSTANCE.isActive(bot))", bridge);
+        int dispatch = watcher.indexOf("if (threat.isPresent())", bridgeEnd);
+        assertTrue(keep >= 0 && bridge > keep && bridgeEnd > bridge && dispatch > bridgeEnd,
+                "the shared escort decision must be computed before both combat handoffs");
+        assertTrue(watcher.substring(bridge, bridgeEnd).contains("&& !followKeepsCurrentThreat"),
+                "an optional PvP bridge must not pause a follow whose escort owns ordinary aggression");
+        assertTrue(watcher.substring(dispatch).contains("&& !followKeepsCurrentThreat) {"),
+                "deterministic combat must not let an aggro marker bypass the escort stance");
+        assertFalse(watcher.contains("aggroTarget.isPresent() || !followKeepsThreat"),
+                "a factual aggressor is a threat signal, not an exception to escort ownership");
+        int followGate = watcher.indexOf("private boolean followKeepsThreat");
+        assertTrue(followGate > dispatch);
+        String escortGate = watcher.substring(followGate, watcher.indexOf("\n    }", followGate));
+        assertTrue(escortGate.contains("!followMayRetainOrdinaryHostile(bot, top.entity())"),
+                "follow ownership must use the ordinary-melee retention policy");
+        int retention = watcher.indexOf("private static boolean followMayRetainOrdinaryHostile");
+        assertTrue(retention > followGate);
+        String retentionPolicy = watcher.substring(retention, watcher.indexOf("\n    }", retention));
+        String escort = read("task/FollowEscort.java");
+        assertTrue(retentionPolicy.contains("CombatCore.isDrawnRangedForeignBot(entity)")
+                        && retentionPolicy.contains("CombatCore.isMeleeForbiddenThreat(entity)")
+                        && retentionPolicy.contains("bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()")
+                        && retentionPolicy.contains("shouldStartLastResortShelter(bot, hostileThreat(entity))")
+                        && !retentionPolicy.contains("FollowEscort.canEngage")
+                        && !retentionPolicy.contains("ObservableWorldQuery.canNoticeCreature")
+                        && !retentionPolicy.contains("CombatCore.hasLineOfSight"),
+                "task ownership must retain ordinary melee pressure independently of immediate strike acquisition");
+        assertTrue(escort.contains("bot.distanceTo(entity) <= ENGAGED_RANGE")
+                        && escort.contains("CombatCore.isMeleeForbiddenThreat(entity)")
+                        && escort.contains("ObservableWorldQuery.canNoticeCreature(bot, entity)")
+                        && escort.contains("CombatCore.hasLineOfSight(bot, entity)"),
+                "escort swings still require nearby, noticed, physically visible melee targets");
+    }
+
+    @Test
+    void ordinaryMeleeCannotMaskASimultaneousThreatThatMustEscalateFollow() throws IOException {
+        String watcher = read("task/DangerWatcher.java");
+        int active = watcher.indexOf("Optional<Task> active = TaskManager.INSTANCE.getActive(bot);");
+        int promotion = watcher.indexOf("threat = promoteFollowEscalationThreat", active);
+        int shelterEpisode = watcher.indexOf("refreshShelterEpisode(bot, hostilePressure)", active);
+        assertTrue(active >= 0 && promotion > active && shelterEpisode > promotion,
+                "an escalation candidate must replace ordinary escort pressure before every safety/dispatch branch");
+
+        int helper = watcher.indexOf("private static Optional<Threat> promoteFollowEscalationThreat");
+        int hostileFactory = watcher.indexOf("private static Threat hostileThreat", helper);
+        assertTrue(helper > shelterEpisode && hostileFactory > helper);
+        String promotionHelper = watcher.substring(helper, hostileFactory);
+        assertTrue(promotionHelper.contains("aggroTarget.filter(candidate -> !candidates.contains(candidate)).ifPresent(candidates::add)")
+                        && promotionHelper.contains("pvpPlayerAggressors.stream()")
+                        && promotionHelper.contains(".filter(candidate -> !candidates.contains(candidate))")
+                        && promotionHelper.contains(".filter(entity -> !followMayRetainOrdinaryHostile(bot, entity))"),
+                "the promotion must include the nearest factual aggressor and every admitted PvP aggressor, then exclude only pressure that follow may retain");
+        assertTrue(promotionHelper.contains("entity instanceof Creeper || CombatCore.isBossThreat(entity)")
+                        && promotionHelper.contains("CombatCore.isMeleeForbiddenThreat(entity) || CombatCore.isLongRangeDanger(entity)")
+                        && promotionHelper.contains("thenComparingDouble(bot::distanceTo)"),
+                "unescortable hazards must select creeper/boss first, then evade/ranged threats, then distance");
+
+        int keep = watcher.indexOf("private boolean followKeepsThreat");
+        String keepHelper = watcher.substring(keep, watcher.indexOf("\n    }", keep));
+        assertTrue(keepHelper.contains("!followMayRetainOrdinaryHostile(bot, top.entity())"),
+                "single- and multi-threat escort ownership must use one retention predicate");
+        int selectPvp = watcher.indexOf("private static List<LivingEntity> selectPvpPlayerAggressors");
+        assertTrue(selectPvp > helper);
+        int bridgeSelector = watcher.indexOf("private static Optional<LivingEntity> selectPvpBridgeAggressor", selectPvp);
+        assertTrue(bridgeSelector > selectPvp);
+        String pvpSelector = watcher.substring(selectPvp, bridgeSelector);
+        assertTrue(pvpSelector.contains("snapshot.candidates()")
+                        && pvpSelector.contains("retained.filter(candidate -> !candidates.contains(candidate)).ifPresent(candidates::add)")
+                        && pvpSelector.contains(".filter(DangerWatcher::isPvpBotPlayerAggressor)")
+                        && pvpSelector.contains(".toList()")
+                        && !pvpSelector.contains(".min("),
+                "all admitted marked PvP targets survive the first selection rather than being reduced to the nearest one");
+        String bridgeHelper = watcher.substring(bridgeSelector, watcher.indexOf("\n    }", bridgeSelector));
+        assertTrue(bridgeHelper.contains("threat.map(Threat::entity)")
+                        && bridgeHelper.contains(".filter(candidates::contains)")
+                        && bridgeHelper.contains("boolean escortFollow = isEscortFollow(bot, active)")
+                        && bridgeHelper.contains("!followMayRetainOrdinaryHostile(bot, candidate)")
+                        && bridgeHelper.contains("if (escortFollow) {\n            return candidates.stream()"),
+                "the bridge keeps a promoted PvP threat and never selects a retained ordinary marked player while land escort is active");
+    }
+
+    @Test
+    void vanillaAggroMustBePerceivedAndHaveMossOwnOmnidirectionalPhysicalLineBeforeItCanDispatchCombat() throws IOException {
+        String watcher = read("task/DangerWatcher.java");
+        int aggro = watcher.indexOf("ImmediateAggressors aggressorSnapshot = immediateAggressors(bot);");
         int fallback = watcher.indexOf("if (threat.isEmpty() && aggroTarget.isPresent())", aggro);
         assertTrue(aggro >= 0 && fallback > aggro);
         String aggroSelection = watcher.substring(aggro, fallback);
-        assertTrue(aggroSelection.contains(".filter(candidate -> hasOmnidirectionalCombatLine(bot, candidate))"),
-                "a raw Mob target behind terrain must not start local combat or preempt follow");
+        assertTrue(aggroSelection.contains("nearestAdmittedAggressor(bot, aggressorSnapshot)\n                .or(() -> retainedPvpAggressor)")
+                        && aggroSelection.contains("selectPvpPlayerAggressors(\n                bot, aggressorSnapshot, retainedPvpAggressor)"),
+                "an invalid raw mob must be rejected before it can suppress the retained PvP fallback");
+        assertTrue(aggroSelection.contains("pvpAggressors.get(bot.getUUID())")
+                        && aggroSelection.contains(".filter(candidate -> isAdmittedCombatAggressor(bot, candidate))"),
+                "the retained PvP target needs the same physical-line admission before it regains control");
+
+        int admission = watcher.indexOf("private static boolean isAdmittedCombatAggressor");
+        assertTrue(admission > fallback);
+        String admissionHelper = watcher.substring(admission, watcher.indexOf("\n    }", admission));
+        assertTrue(admissionHelper.contains("!(candidate instanceof Mob) || SharedVision.seenByBotOrOwner(bot, candidate)"),
+                "a vanilla target alone must not bypass the companion's normal perception boundary");
+        assertTrue(admissionHelper.contains("hasOmnidirectionalCombatLine(bot, candidate)"),
+                "a perceived raw Mob target behind terrain must not start local combat or preempt follow");
 
         int lineCheck = watcher.indexOf("private static boolean hasOmnidirectionalCombatLine");
         assertTrue(lineCheck > fallback);

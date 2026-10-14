@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * be called only from
  * <ul>
  *   <li>{@code AIPlayerEntity}, which merely delegates its overrides to {@code super} (and records them in {@code TeleportAudit});</li>
+ *   <li>{@code MinecraftAiCommand}, the caller's own last-death teleport, based only on that player's vanilla marker;</li>
  *   <li>{@code AIPlayerManager}, the lifecycle (spawn, respawn after death);</li>
  *   <li>{@code MinecraftAiServerNetworking}, the panel's RECALL / TO_AI buttons, gated by the MANUAL_TELEPORT capability;</li>
  *   <li>the four operator-profile EMERGENCY rescues ({@code TeleportAudit.PRIVILEGED_METHODS}), each of which decides the
@@ -62,6 +63,7 @@ class NoCorrectionTeleportSourceTest {
         }
         java.util.Set<String> allowed = new java.util.TreeSet<>(java.util.Set.of(
                 "entity/AIPlayerEntity.java",
+                "command/MinecraftAiCommand.java",
                 "manager/AIPlayerManager.java",
                 "network/MinecraftAiServerNetworking.java"));
         allowed.addAll(EMERGENCY_SITES.keySet());

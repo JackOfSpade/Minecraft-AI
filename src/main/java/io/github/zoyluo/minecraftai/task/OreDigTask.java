@@ -5076,8 +5076,15 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // ItemEntity appears one or more ticks after the break. Chase an observable entity first;
         // when terrain occludes it, return to the exact mined cell so vanilla collision pickup can
         // occur without reading a hidden entity or mutating inventory.
+        // The inventory ledger identifies a drop only by item type, not by entity identity.  Do
+        // not let that turn another miner's coal/iron drop into this break's pickup debt: a
+        // matching item elsewhere in the broad observation radius is useful ambient evidence,
+        // but it cannot be the output of the observed block we just broke.  Binding the recovery
+        // to the break's small physical launch/fall envelope also stops a nearby bot from routing
+        // across the room and collecting a competing miner's pending output.
         Optional<net.minecraft.world.entity.item.ItemEntity> visibleDrop =
-                HarvestCore.nearestDropAnyOf(bot, targetDrops, 16.0D);
+                HarvestCore.nearestDropAnyOf(bot, targetDrops, TARGET_DROP_LAST_SEEN_RANGE,
+                        drop -> isPendingTargetDropCandidate(drop.blockPosition()));
         visibleDrop.ifPresent(drop ->
                 pendingPickupLastSeenPos = drop.blockPosition().immutable());
         // A gain does not end the recovery while a target drop is still in sight: the confirmation below waits for it to
@@ -5368,6 +5375,28 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
         // airborne-column helper must separately prove a visible dry shaft and exact surface route.
         return horizontal <= 1 && downward >= 0
                 && downward <= TARGET_DROP_LAST_SEEN_RANGE;
+    }
+
+    /**
+     * True when a visible matching item can factually be the output of {@link #pendingPickupPos}.
+     *
+     * <p>A vanilla block drop starts in its source cell and can roll at most two horizontal cells
+     * before the observed support/shaft recovery owns it. It can rise briefly by one cell during
+     * its spawn impulse, or fall through the bounded recovery shaft.
+     * Items of the same type farther away belong to an earlier break or another miner, and must
+     * not replace this ledger's last-seen coordinate.</p>
+     */
+    private boolean isPendingTargetDropCandidate(BlockPos dropPos) {
+        if (pendingPickupPos == null || dropPos == null) {
+            return false;
+        }
+        int horizontal = Math.max(
+                Math.abs(dropPos.getX() - pendingPickupPos.getX()),
+                Math.abs(dropPos.getZ() - pendingPickupPos.getZ()));
+        int vertical = dropPos.getY() - pendingPickupPos.getY();
+        return horizontal <= 2
+                && vertical <= 1
+                && vertical >= -TARGET_DROP_LAST_SEEN_RANGE;
     }
 
     /** Returns the swept head cell for an adjacent lower ore, or null for every other geometry. */
@@ -8061,7 +8090,31 @@ public final class OreDigTask extends AbstractTask implements CheckpointableTask
 
         @Override
         public ObservedReach.Result observedReach(BlockPos from, BlockPos to) {
-            return ObservedReach.search(state == null ? null : state.occupancyIfPresent(), from, to);
+            ObservedOccupancy occupancy = state == null ? null : state.occupancyIfPresent();
+            if (occupancy == null || !reproveObservedStands(from, to)) {
+                return ObservedReach.search(occupancy, from, to);
+            }
+            return ObservedReach.searchWithReprovenEndpoints(occupancy, from, to);
+        }
+
+        /**
+         * A detour pose has just passed this proof, but the bot's current stand has not.  Re-check both before
+         * allowing a stale occupancy endpoint to become only an inconclusive reach precheck.
+         */
+        private boolean reproveObservedStands(BlockPos from, BlockPos to) {
+            if (!observedStandEnvelope(from) || !observedStandEnvelope(to)) {
+                return false;
+            }
+            // This is a two-cell current-world reproof.  Avoid flushing the shared pathfinding
+            // memo for every detour candidate (other bots may be searching concurrently).
+            return Standability.isStandableFresh(world, from) && Standability.isStandableFresh(world, to);
+        }
+
+        private boolean observedStandEnvelope(BlockPos stand) {
+            return stand != null
+                    && ObservableWorldQuery.canObserveCell(bot, stand)
+                    && ObservableWorldQuery.canObserveCell(bot, stand.above())
+                    && ObservableWorldQuery.canObserveBlock(bot, stand.below());
         }
 
         @Override

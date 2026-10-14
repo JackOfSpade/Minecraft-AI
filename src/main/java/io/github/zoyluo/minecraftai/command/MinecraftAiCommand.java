@@ -7,12 +7,11 @@ import io.github.zoyluo.minecraftai.autosprint.AutoSprintDirection;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationGate;
 import io.github.zoyluo.minecraftai.auth.BotAuthorizationPolicy;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
-import io.github.zoyluo.minecraftai.pathfinding.Standability;
+import io.github.zoyluo.minecraftai.pathfinding.TeleportSafety;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -43,11 +42,17 @@ public final class MinecraftAiCommand {
                 .then(literal("list")
                         .executes(context -> list(context.getSource())))
                 .then(literal("last-death")
-                        .executes(context -> returnToLastDeath(context.getSource())))
+                        .executes(context -> teleportToLastDeath(context.getSource())))
                 .then(literal("recall")
                         .then(argument("name", StringArgumentType.word())
                                 .executes(context -> recallCompanion(context.getSource(),
                                         StringArgumentType.getString(context, "name")))))
+                .then(literal("teleport")
+                        .then(literal("death")
+                                .executes(context -> teleportToLastDeath(context.getSource()))))
+                .then(literal("death")
+                        .then(literal("teleport")
+                                .executes(context -> teleportToLastDeath(context.getSource()))))
                 .then(literal("companions")
                         .then(literal("recall")
                                 .executes(context -> recallCompanions(context.getSource()))
@@ -101,37 +106,36 @@ public final class MinecraftAiCommand {
         return 1;
     }
 
-    /** Sends the issuing player to a standable cell by their vanilla last-death marker, including another dimension. */
-    private static int returnToLastDeath(CommandSourceStack source) {
+    /** Teleports the caller near, rather than onto, their own vanilla last-death location. */
+    private static int teleportToLastDeath(CommandSourceStack source) {
         ServerPlayer player = source.getPlayer();
         if (player == null) {
-            source.sendFailure(Component.literal("[Minecraft-AI] Returning to a death location must be run by a player."));
+            source.sendFailure(Component.literal("[Minecraft-AI] Teleport to death must be run by a player."));
             return 0;
         }
         GlobalPos death = player.getLastDeathLocation().orElse(null);
         if (death == null) {
-            source.sendFailure(Component.literal("[Minecraft-AI] No last death location is available."));
+            source.sendFailure(Component.literal("[Minecraft-AI] You do not have a recorded death location yet."));
             return 0;
         }
-        ServerLevel level = source.getServer().getLevel(death.dimension());
-        if (level == null) {
-            source.sendFailure(Component.literal("[Minecraft-AI] Your last death dimension is not available."));
+        ServerLevel deathWorld = source.getServer().getLevel(death.dimension());
+        if (deathWorld == null) {
+            source.sendFailure(Component.literal("[Minecraft-AI] Your last-death dimension is not available."));
             return 0;
         }
-        BlockPos origin = death.pos();
-        // Never use the raw death cell: it can be lava (or otherwise unsafe). A nearby, dry,
-        // standable position also makes a cross-dimension return behave like a normal teleport.
-        BlockPos destination = Standability.isStandable(level, origin) ? origin
-                : Standability.findNearestStandable(level, origin, 8, 128, 32).orElse(null);
-        if (destination == null) {
-            source.sendFailure(Component.literal("[Minecraft-AI] No safe position was found near your last death."));
-            return 0;
-        }
-        player.teleportTo(level, destination.getX() + 0.5D, destination.getY(), destination.getZ() + 0.5D,
-                java.util.Set.of(), player.getYRot(), player.getXRot(), true);
-        source.sendSuccess(() -> Component.literal("[Minecraft-AI] Returned near your last death in "
-                + level.dimension().identifier() + "."), false);
-        return 1;
+        return TeleportSafety.findNearestHostileSafeStandable(deathWorld, death.pos(), 48, 8, 8)
+                .map(landing -> {
+                    player.teleportTo(deathWorld, landing.getX() + 0.5D, landing.getY(), landing.getZ() + 0.5D,
+                            java.util.Set.of(), player.getYRot(), player.getXRot(), true);
+                    source.sendSuccess(() -> Component.literal("[Minecraft-AI] Teleported to a safe spot near your last death "
+                            + "at " + landing.toShortString() + "."), false);
+                    return 1;
+                })
+                .orElseGet(() -> {
+                    source.sendFailure(Component.literal("[Minecraft-AI] No safe landing away from hostile mobs was found "
+                            + "near your last death."));
+                    return 0;
+                });
     }
 
     private static int recallCompanions(CommandSourceStack source) {

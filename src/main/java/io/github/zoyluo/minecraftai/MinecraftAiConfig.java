@@ -651,8 +651,9 @@ public record MinecraftAiConfig(
 
     /**
      * Moves the Baritone navigation engine may use ({@code nav.baritone}); each is a legitimate move of a player and stays inside
-     * the survival rules (see {@code docs/NAVIGATION_ENGINE.md}). They are applied to Baritone's global settings at every plan request
-     * ({@code BaritoneSettings.applyNavLimits}), so a reload takes effect at the next plan.
+     * the survival rules (see {@code docs/NAVIGATION_ENGINE.md}). Their switches and the conservative dry-fall ceiling are captured
+     * when a route or standalone plan is admitted, then replayed into Baritone's global settings before that bot executes; a reload
+     * therefore affects the next admission, never a calculation or fall already in progress.
      *
      * <ul>
      *   <li>{@code parkour}: jumps over gaps of 2 and 3 blocks (a sprint jump; a wider gap is never planned).</li>

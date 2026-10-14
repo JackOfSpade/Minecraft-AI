@@ -102,6 +102,11 @@ public final class BaritoneDriver {
                 return false;
             }
             entry.context.refreshEntities();
+            // CalculationContext snapshots several upstream fall settings. The patched boolean
+            // comes from ServerPlayerContext per bot, but MovementFall also builds a short-lived
+            // context while it executes. Reapply immediately before this bot's PRE tick so a
+            // different bot's route cannot leave it with the wrong bucket-height snapshot.
+            BaritoneSettings.applyNavLimits(bot);
             injectTestFault("before_physics");
             baritone.getGameEventHandler().onTick(nextTick(EventState.PRE));
             // A callback in PRE may have changed controller ownership in this same tick; do
@@ -152,7 +157,7 @@ public final class BaritoneDriver {
                 entry.waterAllowed = false;
                 entry.context.setWaterAllowed(false);
                 NavSafetyNet.INSTANCE.clearBaritoneWater(bot);
-                BotInputBridge.release(bot);
+                BotInputBridge.releaseForFollowHandoff(bot);
                 BotLog.lifecycle(bot, "baritone_released", "pos", bot.blockPosition());
             }
             return false;
@@ -191,6 +196,16 @@ public final class BaritoneDriver {
         }
         IBaritone baritone = entry.baritone;
         try {
+            // AIPlayerEntity.move deliberately latches rather than tears down a route while
+            // vanilla collision resolution is on the stack. Consume it at this post-physics
+            // seam, before a Baritone post hook can observe or extend a clipped movement.
+            String physicalBoundaryFailure = BaritoneRegistry.INSTANCE.consumeMovementBoundaryPhysicsFailure(bot);
+            if (physicalBoundaryFailure != null) {
+                BotLog.warn(io.github.zoyluo.minecraftai.log.LogCategory.PATH, bot,
+                        "baritone_observed_path_refused", "reason", physicalBoundaryFailure);
+                BaritoneRegistry.INSTANCE.revokeObservation(bot, physicalBoundaryFailure, false);
+                return false;
+            }
             // 4. The look target of this tick becomes the bot's rotation. LookBehavior writes yRot/xRot only; 5. the head and
             // the body follow the way LookAction turns a bot, so what other players see and what local aiming reads agree.
             injectTestFault("after_physics");

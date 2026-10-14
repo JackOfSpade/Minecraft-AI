@@ -1555,9 +1555,14 @@ public final class NavSafetyNet {
                 }
                 return false;
             }
+            boolean withinContinuation = withinRescueStepContinuationEnvelope(bot.blockPosition(), admission,
+                    pack.activeStepKind(), pack.activeStepTicks());
+            boolean currentDrift = pack.activeStepKind() == WalkedStep.Kind.SWIM
+                    && admission.sourceWater()
+                    && !withinContinuation
+                    && withinRescueStepCurrentEnvelope(bot.blockPosition(), admission.origin(), admission.destination());
             if (admission.hiddenWorldScan() != hiddenWaterScan
-                    || !withinRescueStepContinuationEnvelope(bot.blockPosition(), admission,
-                    pack.activeStepKind(), pack.activeStepTicks())) {
+                    || (!withinContinuation && !currentDrift)) {
                 // Cancel before the action pack advances. The rest of this safety tick then
                 // re-plans under the current capability and can use only a fresh strict proof.
                 // A command or another controller may likewise not inherit movement keys that
@@ -1661,34 +1666,49 @@ public final class NavSafetyNet {
         // stroke completes; that small water-only displacement is re-proved below. A multi-cell
         // external relocation can never keep old rescue keys alive.
         BlockPos feet = bot.blockPosition();
+        boolean withinContinuation = withinRescueStepContinuationEnvelope(feet, admission, step.kind(), step.ticks());
         boolean currentDrift = step.kind() == WalkedStep.Kind.SWIM && admission.sourceWater()
+                && !withinContinuation
                 && withinRescueStepCurrentEnvelope(feet, admission.origin(), admission.destination());
         if (!step.cell().equals(admission.destination())
-                || (!withinRescueStepContinuationEnvelope(feet, admission, step.kind(), step.ticks()) && !currentDrift)) {
-            return false;
+                || (!withinContinuation && !currentDrift)) {
+            return rejectRescueStepContinuation(bot, step, admission, "outside_admitted_corridor");
         }
         if (admission.hiddenWorldScan()) {
-            return canUseHiddenWaterScan(bot);
+            return canUseHiddenWaterScan(bot)
+                    || rejectRescueStepContinuation(bot, step, admission, "hidden_scan_revoked");
         }
         WaterEscapeCell observed = observedWaterEscapeCell(bot, bot.level(), step.cell(), false);
         // A strict target must remain currently observable for every guarded tick. A newly placed
         // wall can turn the target into an UNKNOWN ray miss just as readily as it can make the
         // target visibly invalid; retained admission proof must never bridge either world change.
         if (observed == null) {
-            return false;
+            return rejectRescueStepContinuation(bot, step, admission, "destination_unobserved");
         }
         if (step.kind() == WalkedStep.Kind.SWIM ? observed != WaterEscapeCell.WATER
                 : observed != WaterEscapeCell.DRY) {
-            return false;
+            return rejectRescueStepContinuation(bot, step, admission, "destination_changed");
         }
         if (step.kind() == WalkedStep.Kind.SWIM
                 && hasVisibleSolidDiagonalWaterCorner(bot, admission.origin(), admission.destination())) {
-            return false;
+            return rejectRescueStepContinuation(bot, step, admission, "diagonal_corner_closed");
         }
         if (currentDrift && observedWaterEscapeCell(bot, bot.level(), feet, false) != WaterEscapeCell.WATER) {
-            return false;
+            return rejectRescueStepContinuation(bot, step, admission, "current_drift_unobserved");
         }
-        return SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind());
+        return SwimRoute.canObserveWalkedStepRefusalEnvelope(bot, step.cell(), step.kind())
+                || rejectRescueStepContinuation(bot, step, admission, "refusal_envelope_unobserved");
+    }
+
+    /** Emits the precise pre-validation reason when a guarded rescue stroke must fail closed. */
+    private static boolean rejectRescueStepContinuation(AIPlayerEntity bot, WalkedStep step,
+                                                        RescueStepAdmission admission, String reason) {
+        BotLog.action(bot, "navsafe_water_guard_refused", "why", reason,
+                "kind", step.kind(), "ticks", step.ticks(),
+                "feet", bot.blockPosition().toShortString(),
+                "origin", admission.origin().toShortString(),
+                "destination", admission.destination().toShortString());
+        return false;
     }
 
     /** The axis-aligned corridor of one vanilla step; a drop's intermediate vertical cells are legitimate. */
@@ -1735,10 +1755,16 @@ public final class NavSafetyNet {
                 && feet.getY() <= Math.max(origin.getY(), destination.getY()) + 1;
     }
 
-    /** One flowing-water cell of drift is safe only while the continued rescue re-proves that cell as water. */
-    private static boolean withinRescueStepCurrentEnvelope(BlockPos feet, BlockPos origin,
-                                                           BlockPos destination) {
-        return feet.getX() >= Math.min(origin.getX(), destination.getX()) - 1
+    /**
+     * One flowing-water cell of drift is safe only while the continued rescue re-proves that
+     * cell as water. Currents may carry a horizontal stroke sideways while its input takes
+     * effect; vertical bobbing is retained by the ordinary bounded settling envelope instead,
+     * rather than being treated as an external current displacement.
+     */
+    static boolean withinRescueStepCurrentEnvelope(BlockPos feet, BlockPos origin,
+                                                    BlockPos destination) {
+        return origin.getY() == destination.getY()
+                && feet.getX() >= Math.min(origin.getX(), destination.getX()) - 1
                 && feet.getX() <= Math.max(origin.getX(), destination.getX()) + 1
                 && feet.getZ() >= Math.min(origin.getZ(), destination.getZ()) - 1
                 && feet.getZ() <= Math.max(origin.getZ(), destination.getZ()) + 1

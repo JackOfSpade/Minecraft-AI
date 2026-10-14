@@ -190,9 +190,11 @@ public final class ActionPack {
      * drives Baritone directly, its goal and path. Nothing Baritone-related is touched while Baritone has never been initialised.
      */
     private void releaseBaritone(String why) {
-        if (route != null) {
-            cancelBaritoneRoute(why);
-        } else {
+        // cancelBaritoneRoute settles first. A route may have naturally ended between this
+        // branch check and that settlement; in that case still preempt so an explicit local
+        // claim invalidates Baritone's bounded follow handoff as well as direct Baritone work.
+        boolean cancelled = route != null && cancelBaritoneRoute(why);
+        if (!cancelled) {
             NavEngineSelector.hook("baritone_preempt", () -> BaritoneRegistry.INSTANCE.preempt(player, why));
         }
     }
@@ -260,8 +262,14 @@ public final class ActionPack {
         player.xxa = applied.strafing();
     }
 
-    /** Converts forward/strafe inputs between two body yaws while retaining their world-space direction. */
-    static MovementInputs reprojectControllerInputs(float forward, float strafing, float yawBefore, float yawAfter) {
+    /**
+     * Converts raw forward/strafe inputs between two body yaws while retaining their world-space direction.
+     *
+     * <p>The Baritone input bridge uses the same transform for its one-tick follow-route handoff: a
+     * shield may turn the bot after a route has scheduled its next calculation, but that must not bend
+     * the route's final real movement vector toward the projectile.</p>
+     */
+    public static MovementInputs reprojectControllerInputs(float forward, float strafing, float yawBefore, float yawAfter) {
         double beforeRadians = Math.toRadians(yawBefore);
         double worldX = strafing * Math.cos(beforeRadians) - forward * Math.sin(beforeRadians);
         double worldZ = forward * Math.cos(beforeRadians) + strafing * Math.sin(beforeRadians);
@@ -278,7 +286,8 @@ public final class ActionPack {
         return new MovementInputs(clampInput((float) projectedForward), clampInput((float) projectedStrafing));
     }
 
-    record MovementInputs(float forward, float strafing) {
+    /** A bounded pair of vanilla raw movement inputs. */
+    public record MovementInputs(float forward, float strafing) {
     }
 
     /**
@@ -681,6 +690,46 @@ public final class ActionPack {
     }
 
     /**
+     * Starts a no-dig/no-pillar surface path whose actual movement stays inside an immutable
+     * circular local-site boundary.  The boundary reaches the Baritone cell gate and the
+     * pre-execution movement checks; it is not an endpoint-only preference.
+     *
+     * <p>The vertical floor applies to player feet. Supporting terrain directly below an allowed
+     * feet cell remains visible to the planner, so a route standing on its lowest permitted layer
+     * does not lose its real floor.</p>
+     */
+    public ActionResult startAnchoredSurfacePathTo(
+            BlockPos goal, BlockPos anchor, int horizontalRadius, int minimumFeetY) {
+        if (anchor == null || horizontalRadius < 0) {
+            return ActionResult.failed("navigation_movement_boundary_invalid");
+        }
+        return startSurfacePathWithinBoundary(goal,
+                new NavRoute.MovementBoundary(anchor, horizontalRadius, minimumFeetY));
+    }
+
+    /**
+     * Starts a no-dig/no-pillar surface path under a caller-owned immutable movement boundary.
+     * Local input steps can retain this exact object, keeping Baritone and non-Baritone combat
+     * motion under one definition of the local site.
+     */
+    public ActionResult startSurfacePathWithinBoundary(
+            BlockPos goal, NavRoute.MovementBoundary boundary) {
+        if (boundary == null) {
+            return ActionResult.failed("navigation_movement_boundary_invalid");
+        }
+        if (!boundary.allowsFeet(goal)) {
+            return ActionResult.failed("navigation_goal_outside_movement_boundary");
+        }
+        // A knockback may move the body outside after a prior leg. Do not give a new Baritone
+        // route authority from that cell; the owning task can cancel/retry or choose its safe
+        // pressure fallback on this same tick.
+        if (!boundary.allowsFeet(player.blockPosition())) {
+            return ActionResult.failed("navigation_movement_boundary_current_position_outside");
+        }
+        return startPathTo(goal, false, false, 0, RouteConstraints.anchoredSurface(boundary));
+    }
+
+    /**
      * Starts a no-dig/no-pillar surface route that must remain at or above {@code minimumY}.
      * This overload does not require a round-trip proof.
      */
@@ -777,7 +826,7 @@ public final class ActionPack {
         // A caller that keeps a stone reserve must not have it spent on pillars/bridges by a planner that cannot see the reserve.
         NavRoute.Options options = NavRouteRules.optionsFor(allowDigFallback, canPillar, reserve, player.isInWater());
         NavRoute request = new NavRoute(NavRoute.Shape.BLOCK, goal, 0, options, kind, serverTick(),
-                routeConstraints.minimumY(), routeConstraints.returnAnchor());
+                routeConstraints.minimumY(), routeConstraints.returnAnchor(), routeConstraints.movementBoundary());
         if (pillarPlacementColumnOnly) {
             request.requirePillarPlacementColumn();
         }
@@ -1489,9 +1538,7 @@ public final class ActionPack {
         if (emergencyInputBlocked()) {
             return;
         }
-        if (route != null) {
-            cancelBaritoneRoute("stop_navigation");
-        }
+        releaseBaritone("stop_navigation");
         cancelStep();
         this.walkTo = null;
         clearRouteLease();
@@ -1923,17 +1970,27 @@ public final class ActionPack {
     }
 
     /** The constraints a Baritone route carries independently of the retired local executor. */
-    private record RouteConstraints(int minimumY, BlockPos returnAnchor) {
+    private record RouteConstraints(int minimumY, BlockPos returnAnchor, NavRoute.MovementBoundary movementBoundary) {
         private RouteConstraints {
             returnAnchor = returnAnchor == null ? null : returnAnchor.immutable();
         }
 
         static RouteConstraints unrestricted() {
-            return new RouteConstraints(Integer.MIN_VALUE, null);
+            return new RouteConstraints(Integer.MIN_VALUE, null, null);
         }
 
         static RouteConstraints constrainedSurface(int minimumY, BlockPos returnAnchor) {
-            return new RouteConstraints(minimumY, returnAnchor);
+            return new RouteConstraints(minimumY, returnAnchor, null);
+        }
+
+        /**
+         * A feet-level movement boundary owns its vertical floor.  The ordinary observation
+         * fence remains vertically open so Baritone can inspect the support directly below the
+         * lowest legal feet position; pre-execution checks reject any actual lower feet cell.
+         */
+        static RouteConstraints anchoredSurface(NavRoute.MovementBoundary movementBoundary) {
+            return new RouteConstraints(Integer.MIN_VALUE, null,
+                    java.util.Objects.requireNonNull(movementBoundary, "movementBoundary"));
         }
     }
 

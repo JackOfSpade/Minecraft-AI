@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -43,8 +44,9 @@ import net.minecraft.world.phys.Vec3;
  *   <li>mob avoidance: a route bends around a hostile mob the bot can see, and ignores one it cannot (sealed behind a wall).</li>
  * </ul>
  *
- * <p>Every course is sealed by a bedrock ring. The capability switches are installed through the config (reflectively, the way
- * the other GameTests swap it) before the bot's Baritone instance is made, and put back when the run ends.</p>
+ * <p>Every course is sealed by a bedrock ring. A fixture exposes its requested capabilities only while it synchronously creates
+ * its Baritone context or admits a route; production then captures that route-local snapshot. This keeps concurrently scheduled
+ * GameTests from lending one course's mutable global config to another course while either route is running.</p>
  */
 public final class BaritoneCapabilityGameTests {
     /**
@@ -369,14 +371,16 @@ public final class BaritoneCapabilityGameTests {
             slimes.add(slime(c, 8 + i, 0, (i % 2 == 0 ? 6 : -6)));
         }
         List<AIPlayerEntity> bots = List.of(c.bot, second, third);
-        for (AIPlayerEntity bot : bots) {
-            BaritoneRegistry.INSTANCE.get(bot);
-            // Perception: each bot looks east, at the middle of the two slime rows, so every slime is inside its view; the count below
-            // is taken at tick 60, after the reaction time of the shared formula for the farthest and widest of them.
-            PerceptionFixtures.facePoint(bot, Vec3.atCenterOf(c.feet.offset(10, 0, 0)));
-            require(context, PerceptionFixtures.reactionTicks(bot, slimes) < 60,
-                    "fixture: the slimes are not all noticed by tick 60 by the formula: " + PerceptionFixtures.reactionTicks(bot, slimes));
-        }
+        withCaps(c.caps, () -> {
+            for (AIPlayerEntity bot : bots) {
+                BaritoneRegistry.INSTANCE.get(bot);
+                // Perception: each bot looks east, at the middle of the two slime rows, so every slime is inside its view; the count below
+                // is taken at tick 60, after the reaction time of the shared formula for the farthest and widest of them.
+                PerceptionFixtures.facePoint(bot, Vec3.atCenterOf(c.feet.offset(10, 0, 0)));
+                require(context, PerceptionFixtures.reactionTicks(bot, slimes) < 60,
+                        "fixture: the slimes are not all noticed by tick 60 by the formula: " + PerceptionFixtures.reactionTicks(bot, slimes));
+            }
+        });
         long[] nanos = {0L};
         int[] ticks = {0};
         int[] observed = {0};
@@ -406,7 +410,6 @@ public final class BaritoneCapabilityGameTests {
                 }
                 require(context, observed[0] >= 3 * 4, "the bots see too few hostiles (" + observed[0] + " of 18)");
                 require(context, perTickMs < 1.0D, "observing hostiles costs " + perTickMs + " ms per tick for three bots");
-                restoreConfig();
                 context.succeed();
             }
         });
@@ -428,23 +431,30 @@ public final class BaritoneCapabilityGameTests {
     // Harness
     // ---------------------------------------------------------------------------------------------------------------
 
-    private static MinecraftAiConfig originalConfig;
+    /**
+     * Exposes a fixture's caps only for one synchronous setup/admission call. Route creation captures those values into the
+     * production per-bot snapshot before this method restores the exact config it observed on entry; nested scopes restore the
+     * enclosing candidate, and the synchronized boundary prevents two test callbacks from interleaving their swaps.
+     */
+    static void withCaps(MinecraftAiConfig.BaritoneCaps caps, Runnable action) {
+        withCaps(caps, () -> {
+            action.run();
+            return null;
+        });
+    }
 
-    static void installCaps(MinecraftAiConfig.BaritoneCaps caps) {
+    static synchronized <T> T withCaps(MinecraftAiConfig.BaritoneCaps caps, Supplier<T> action) {
+        java.util.Objects.requireNonNull(caps, "caps");
+        java.util.Objects.requireNonNull(action, "action");
         MinecraftAiConfig current = MinecraftAiConfig.get();
-        if (originalConfig == null) {
-            originalConfig = current;
-        }
         MinecraftAiConfig.Nav nav = current.nav();
         MinecraftAiConfig.Nav changed = new MinecraftAiConfig.Nav(nav.jumpReach(), nav.sidleAfter(), nav.sidleLimit(), nav.hardLimit(),
                 nav.lookahead(), nav.nodeRetry(), nav.sprintMinDist(), nav.maxSafeFall(), nav.engine(), caps);
-        setConfig(current.withNav(changed));
-    }
-
-    static void restoreConfig() {
-        if (originalConfig != null) {
-            setConfig(originalConfig);
-            originalConfig = null;
+        try {
+            setConfig(current.withNav(changed));
+            return action.get();
+        } finally {
+            setConfig(current);
         }
     }
 
@@ -474,12 +484,14 @@ public final class BaritoneCapabilityGameTests {
         final int height;
         final int startDy;
         final int startDx;
+        final MinecraftAiConfig.BaritoneCaps caps;
         AIPlayerEntity bot;
         IBaritone baritone;
         float startHealth;
         private final Map<BlockPos, BlockState> before = new HashMap<>();
 
-        private Course(GameTestHelper context, String name, BlockPos feet, int fromX, int toX, int halfZ, int height, int startDy, int startDx) {
+        private Course(GameTestHelper context, String name, BlockPos feet, int fromX, int toX, int halfZ, int height, int startDy,
+                       int startDx, MinecraftAiConfig.BaritoneCaps caps) {
             this.context = context;
             this.world = context.getLevel();
             this.name = name;
@@ -490,11 +502,11 @@ public final class BaritoneCapabilityGameTests {
             this.height = height;
             this.startDy = startDy;
             this.startDx = startDx;
+            this.caps = java.util.Objects.requireNonNull(caps, "caps");
         }
 
         /** The bot starts {@code startDy} above and {@code startDx} east of {@code feet}, which is the floor's surface at x = 0, z = 0. */
         static Course begin(GameTestHelper context, String name, int fromX, int toX, int halfZ, int height, MinecraftAiConfig.BaritoneCaps caps, int startDy, int startDx) {
-            installCaps(caps);
             ServerLevel world = context.getLevel();
             int slab;
             synchronized (SLABS) {
@@ -517,14 +529,14 @@ public final class BaritoneCapabilityGameTests {
                     }
                 }
             }
-            return new Course(context, name, feet, fromX, toX, halfZ, height, startDy, startDx);
+            return new Course(context, name, feet, fromX, toX, halfZ, height, startDy, startDx, caps);
         }
 
         /** Spawns the bot (after the test has built its obstacles: a bot spawned into the air would be snapped to the ground) and makes its Baritone instance. */
         Course spawn() {
             if (bot == null) {
                 bot = BaritoneServerGameTests.spawn(context, name, feet.offset(startDx, startDy, 0));
-                baritone = BaritoneRegistry.INSTANCE.get(bot);
+                baritone = withCaps(caps, () -> BaritoneRegistry.INSTANCE.get(bot));
                 startHealth = bot.getHealth();
             }
             return this;
@@ -539,11 +551,13 @@ public final class BaritoneCapabilityGameTests {
         }
 
         void goalNear(BlockPos goal, int radius, NavRoute.Options options) {
-            ObservedBaritoneTestRoutes.near(bot, goal, radius, options, "gametest_" + name);
+            withCaps(caps, () -> {
+                ObservedBaritoneTestRoutes.near(bot, goal, radius, options, "gametest_" + name);
+            });
         }
 
         BaritoneNavigator.Admission admitGoalNear(BlockPos goal, int radius, NavRoute.Options options) {
-            return ObservedBaritoneTestRoutes.admitNear(bot, goal, radius, options, "gametest_" + name);
+            return withCaps(caps, () -> ObservedBaritoneTestRoutes.admitNear(bot, goal, radius, options, "gametest_" + name));
         }
 
         /** Verifies that this fixture's deliberately unavailable route is refused before it can drive the bot. */
@@ -552,7 +566,7 @@ public final class BaritoneCapabilityGameTests {
             try {
                 assertRefusal(admission, expectedReason, goal);
             } finally {
-                stopAndRestore();
+                stop();
             }
             requireNoBaritoneAfterDespawn();
             context.succeed();
@@ -566,9 +580,8 @@ public final class BaritoneCapabilityGameTests {
             new Run(this).requireNoEdits();
         }
 
-        private void stopAndRestore() {
+        private void stop() {
             AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
-            restoreConfig();
         }
 
         private void requireNoBaritoneAfterDespawn() {
@@ -656,14 +669,12 @@ public final class BaritoneCapabilityGameTests {
                         check.accept(run);
                     } finally {
                         AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
-                        restoreConfig();
                     }
                     context.succeed();
                 } else if (run.ticks > limit) {
                     run.done = true;
                     String where = describe();
                     AIPlayerManager.INSTANCE.despawn(world.getServer(), name);
-                    restoreConfig();
                     require(context, false, name + ": still busy after " + limit + " ticks, " + where);
                 }
             });
@@ -708,7 +719,7 @@ public final class BaritoneCapabilityGameTests {
             try {
                 goalNear(waypoints.get(0), waypointRadii.get(0));
             } catch (RuntimeException exception) {
-                stopAndRestore();
+                stop();
                 throw exception;
             }
             PerceptionFixtures.scheduleEachTick(context, () -> {
@@ -729,7 +740,7 @@ public final class BaritoneCapabilityGameTests {
                             }
                         } catch (RuntimeException exception) {
                             run.done = true;
-                            stopAndRestore();
+                            stop();
                             throw exception;
                         }
                         return;
@@ -739,13 +750,13 @@ public final class BaritoneCapabilityGameTests {
                         System.out.println("BARITONE_CAP " + name + " finished through visible segments after " + run.ticks + " ticks at " + describe());
                         check.accept(run);
                     } finally {
-                        stopAndRestore();
+                        stop();
                     }
                     context.succeed();
                 } else if (run.ticks > limit) {
                     run.done = true;
                     String where = describe();
-                    stopAndRestore();
+                    stop();
                     require(context, false, name + ": visible-segment route still busy after " + limit + " ticks, " + where);
                 }
             });
@@ -766,7 +777,7 @@ public final class BaritoneCapabilityGameTests {
             try {
                 goalNear(waypoints.get(0), waypointRadius);
             } catch (RuntimeException exception) {
-                stopAndRestore();
+                stop();
                 throw exception;
             }
             PerceptionFixtures.scheduleEachTick(context, () -> {
@@ -788,7 +799,7 @@ public final class BaritoneCapabilityGameTests {
                         check.accept(run);
                     } finally {
                         if (run.done) {
-                            stopAndRestore();
+                            stop();
                         }
                     }
                     if (run.done) {
@@ -798,7 +809,7 @@ public final class BaritoneCapabilityGameTests {
                 } else if (run.ticks > limit) {
                     run.done = true;
                     String where = describe();
-                    stopAndRestore();
+                    stop();
                     require(context, false, name + ": refusal relay still busy after " + limit + " ticks, " + where);
                 }
             });

@@ -1,5 +1,6 @@
 package dev.spawnbotswrapper.inhabitants.gametest;
 
+import dev.spawnbotswrapper.inhabitants.config.InhabitantsConfig;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -8,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Objects;
 
 /**
  * The wrapper's {@code pvpbotSettings} policy against the real PvP BOT settings object of the GameTest world. The run
@@ -38,35 +40,52 @@ public final class ManagedSettingsGameTests {
                 + Upstream.setting("isTotemPriority");
     }
 
-    private static boolean heldAtTheShippedValues() {
-        return Boolean.FALSE.equals(Upstream.setting("isAutoEquipWeapon"))
-                && Double.valueOf(64.0).equals(Upstream.setting("getMaxTargetDistance"))
-                && Boolean.FALSE.equals(Upstream.setting("isAutoTargetEnabled"))
-                && Integer.valueOf(20).equals(Upstream.setting("getBowMinDrawTime"))
-                && Double.valueOf(8.0).equals(Upstream.setting("getRangedMinRange"))
-                && Double.valueOf(12.0).equals(Upstream.setting("getRangedOptimalRange"))
-                && Double.valueOf(16.0).equals(Upstream.setting("getRangedMaxRange"))
-                && Boolean.FALSE.equals(Upstream.setting("isRangedRetreatOnClose"))
-                && Double.valueOf(2.5).equals(Upstream.setting("getMeleeRange"))
-                && Boolean.FALSE.equals(Upstream.setting("isAutoTotemEnabled"))
-                && Boolean.FALSE.equals(Upstream.setting("isTotemPriority"));
+    private static boolean isHeld(String getter, Object expected) {
+        return Objects.equals(expected, Upstream.setting(getter));
     }
 
-    /** PvP BOT starts with auto-equip on and a 64 block radius in nothing but its own defaults; the wrapper must have fixed that. */
+    private static boolean heldAtTheShippedValues() {
+        InhabitantsConfig.PvpbotSettings shipped = InhabitantsConfig.PvpbotSettings.shipped();
+        return isHeld("isAutoEquipWeapon", shipped.autoEquipWeapon)
+                && isHeld("getMaxTargetDistance", shipped.maxTargetDistance)
+                && isHeld("isAutoTargetEnabled", shipped.autoTargetEnabled)
+                && isHeld("getBowMinDrawTime", shipped.bowMinDrawTime)
+                && isHeld("getRangedMinRange", shipped.rangedMinRange)
+                && isHeld("getRangedOptimalRange", shipped.rangedOptimalRange)
+                && isHeld("getRangedMaxRange", shipped.rangedMaxRange)
+                && isHeld("isRangedRetreatOnClose", shipped.rangedRetreatOnClose)
+                && isHeld("getMeleeRange", shipped.meleeRange)
+                && isHeld("isAutoTotemEnabled", shipped.autoTotemEnabled)
+                && isHeld("isTotemPriority", shipped.totemPriority);
+    }
+
+    private static void requireFileSetting(GameTestHelper context, String file, String name, Object expected) {
+        String entry = "\"" + name + "\": " + expected;
+        require(context, file.contains(entry), "the settings file is missing " + entry + ":\n" + file);
+    }
+
+    /**
+     * PvP BOT starts with auto-equip on and a 64-block radius in its own defaults; the wrapper must replace those
+     * with its shipped policy.
+     */
     @GameTest(environment = ENV + "settings_applied", maxTicks = 40)
     public void wrapperHoldsPvpBotSettingsAtTheManagedValues(GameTestHelper context) {
         context.runAfterDelay(5, () -> {
             require(context, heldAtTheShippedValues(), "PvP BOT runs with " + held());
             try {
                 String file = Files.readString(settingsFile(), StandardCharsets.UTF_8);
-                require(context, file.contains("\"autoEquipWeapon\": false"),
-                        "the settings file was not written with autoEquipWeapon=false:\n" + file);
-                require(context, file.contains("\"rangedOptimalRange\": 12.0"),
-                        "the managed optimal range is not in the file:\n" + file);
-                require(context, file.contains("\"bowMinDrawTime\": 20"),
-                        "the managed bow draw time is not in the file:\n" + file);
-                require(context, file.contains("\"autoTotemEnabled\": false") && file.contains("\"totemPriority\": false"),
-                        "the managed offhand keys are not in the file:\n" + file);
+                InhabitantsConfig.PvpbotSettings shipped = InhabitantsConfig.PvpbotSettings.shipped();
+                requireFileSetting(context, file, "autoEquipWeapon", shipped.autoEquipWeapon);
+                requireFileSetting(context, file, "autoTargetEnabled", shipped.autoTargetEnabled);
+                requireFileSetting(context, file, "maxTargetDistance", shipped.maxTargetDistance);
+                requireFileSetting(context, file, "rangedMinRange", shipped.rangedMinRange);
+                requireFileSetting(context, file, "rangedOptimalRange", shipped.rangedOptimalRange);
+                requireFileSetting(context, file, "rangedMaxRange", shipped.rangedMaxRange);
+                requireFileSetting(context, file, "rangedRetreatOnClose", shipped.rangedRetreatOnClose);
+                requireFileSetting(context, file, "meleeRange", shipped.meleeRange);
+                requireFileSetting(context, file, "bowMinDrawTime", shipped.bowMinDrawTime);
+                requireFileSetting(context, file, "autoTotemEnabled", shipped.autoTotemEnabled);
+                requireFileSetting(context, file, "totemPriority", shipped.totemPriority);
             } catch (IOException e) {
                 context.fail(net.minecraft.network.chat.Component.nullToEmpty("cannot read " + settingsFile() + ": " + e));
             }

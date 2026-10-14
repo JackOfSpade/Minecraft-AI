@@ -4,10 +4,13 @@ import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.perception.CreatureSenses;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -36,16 +39,17 @@ import net.minecraft.world.phys.Vec3;
  *   <li>WRAPPER AGGRO: when the hostile-inhabitants wrapper has confirmed one of its bots is hunting a protected player, that factual
  *       target immediately becomes MARKED ("aggro"), without requiring the companion to see through a wall.</li>
  *   <li>DRAW: a bow drawn, a trident raised, or a charged crossbow in hand, aimed at the victim (dot &gt;= {@link #AIM_DOT}, within
- *       {@link #AIM_RANGE}), exclusive: MARKED ("aim") on the first sampled tick.</li>
+ *       {@link #AIM_RANGE}), exclusive for {@link #DRAW_TICKS} consecutive samples: MARKED ("aim").</li>
  *   <li>SWING: a swing starts while facing the victim (dot &gt;= {@link #FACING_DOT}) within the interaction range + 1, exclusive, no
  *       hostile mob in reach: SUSPECT ("swing").</li>
  *   <li>ARMED CHARGE: a sword, axe, mace, spear or trident in the main hand, facing the victim, within {@link #CHARGE_RANGE}, closing
- *       over {@link #CHARGE_WINDOW} ticks, exclusive, no hostile mob in reach: MARKED ("charge") before a melee hit lands.</li>
+ *       over {@link #CHARGE_WINDOW} ticks, exclusive, no hostile mob in reach: SUSPECT ("charge") before a melee hit lands.</li>
  * </ul>
  */
 public final class HostileBotIntent {
     static final double SAMPLE_RANGE = 48.0D;
-    static final int DRAW_TICKS = 1;
+    /** Sustained aim prevents one visibility or target-exclusivity transition from becoming a combat mark. */
+    static final int DRAW_TICKS = 20;
     static final double AIM_DOT = 0.94D;
     static final double AIM_RANGE = 40.0D;
     static final double FACING_DOT = 0.9D;
@@ -77,6 +81,14 @@ public final class HostileBotIntent {
             int slot = (int) (wanted & (HISTORY - 1));
             return distanceTick[slot] == wanted ? distance[slot] : Double.NaN;
         }
+
+        /** A skipped observation breaks every sustained aim/charge proof, not just its counters. */
+        private void resetInterruptedSignals() {
+            drawTicks = 0;
+            chargeTicks = 0;
+            // A later charge must not compare its new position with one recorded before a gap.
+            Arrays.fill(distanceTick, Long.MIN_VALUE);
+        }
     }
 
     /** Per aggressor state: the swing edge detector and the pairs. */
@@ -84,6 +96,8 @@ public final class HostileBotIntent {
         long lastTick = Long.MIN_VALUE;
         boolean lastSwinging;
         int lastSwingTime;
+        /** The last level this foreign player was sampled in, used only to fail closed on absence. */
+        ServerLevel level;
         final Map<UUID, Pair> pairs = new HashMap<>();
     }
 
@@ -124,6 +138,7 @@ public final class HostileBotIntent {
     private static void sampleLevel(ServerLevel level) {
         List<ServerPlayer> players = level.players();
         if (players.size() < 2) {
+            resetAbsentAggressorSignals(level, Set.of());
             return;
         }
         List<ServerPlayer> aggressors = null;
@@ -149,11 +164,20 @@ public final class HostileBotIntent {
             }
         }
         if (aggressors == null) {
+            resetAbsentAggressorSignals(level, Set.of());
             return;
         }
         long now = level.getGameTime();
+        Set<UUID> sampledAggressors = new HashSet<>(aggressors.size());
         for (ServerPlayer aggressor : aggressors) {
             Track track = TRACKS.computeIfAbsent(aggressor.getUUID(), ignored -> new Track());
+            // Level-local samples are the continuity boundary. A player who used a portal cannot
+            // complete an aim sequence against a different protected player on the other side.
+            if (track.level != null && track.level != level) {
+                resetTrackSignals(track);
+            }
+            track.level = level;
+            sampledAggressors.add(aggressor.getUUID());
             if (track.lastTick == now) {
                 continue; // one sample per game tick, however often the hook runs
             }
@@ -162,6 +186,7 @@ public final class HostileBotIntent {
             track.lastSwingTime = aggressor.swingTime;
             track.lastTick = now;
             if (victims == null || !aggressor.isAlive() || aggressor.isSpectator()) {
+                resetTrackSignals(track);
                 continue;
             }
             // The wrapper owns the hostile PvP bot's target state. It has already applied its own
@@ -173,17 +198,45 @@ public final class HostileBotIntent {
             if (!perceived(aggressor, observers)) {
                 // Nobody on the protected side has noticed this player (no bot has seen or heard it, no owner is looking at it): its
                 // intent is not something anyone could witness, so nothing is sampled and the sustained counters start over.
-                for (Pair pair : track.pairs.values()) {
-                    pair.drawTicks = 0;
-                    pair.chargeTicks = 0;
-                }
+                resetTrackSignals(track);
                 continue;
             }
+            Set<UUID> currentVictims = new HashSet<>(victims.size());
             for (ServerPlayer victim : victims) {
+                currentVictims.add(victim.getUUID());
                 if (!victim.isAlive() || aggressor.distanceToSqr(victim) > SAMPLE_RANGE * SAMPLE_RANGE) {
+                    Pair skipped = track.pairs.get(victim.getUUID());
+                    if (skipped != null) {
+                        skipped.resetInterruptedSignals();
+                    }
                     continue;
                 }
                 samplePair(aggressor, victim, track.pairs.computeIfAbsent(victim.getUUID(), ignored -> new Pair()), now, swingStart);
+            }
+            // A protected player who disappeared from this level must not resume a partial aim
+            // streak if they return before normal track pruning removes their pair.
+            track.pairs.forEach((victimId, pair) -> {
+                if (!currentVictims.contains(victimId)) {
+                    pair.resetInterruptedSignals();
+                }
+            });
+        }
+        resetAbsentAggressorSignals(level, sampledAggressors);
+    }
+
+    /** Clears evidence for an aggressor/victim pair that was not continuously observable this tick. */
+    private static void resetTrackSignals(Track track) {
+        for (Pair pair : track.pairs.values()) {
+            pair.resetInterruptedSignals();
+        }
+    }
+
+    /** A departed or no-longer-markable aggressor cannot carry a partial aim streak into a later return. */
+    private static void resetAbsentAggressorSignals(ServerLevel level, Set<UUID> sampledAggressors) {
+        for (Map.Entry<UUID, Track> entry : TRACKS.entrySet()) {
+            Track track = entry.getValue();
+            if (track.level == level && !sampledAggressors.contains(entry.getKey())) {
+                resetTrackSignals(track);
             }
         }
     }
@@ -230,9 +283,10 @@ public final class HostileBotIntent {
             HostileBotLedger.suspectPlayer(aggressor, victim, now, "swing");
         }
 
-        // ARMED CHARGE: closing on the victim with a melee weapon, facing it. This is a
-        // pre-hit defence signal, not merely pressure: an attacker at melee range should not get
-        // a free first swing while the companion waits for a damage callback.
+        // ARMED CHARGE: closing on the victim with a melee weapon, facing it. This is
+        // pre-hit pressure, not proof of an attack: it makes AggroSense cautious but remains
+        // SUSPECT until an actual strike, a sustained exclusive ranged aim, or wrapper aggro
+        // establishes a targetable hostile act.
         boolean charging = false;
         if (distance <= CHARGE_RANGE && facing >= FACING_DOT && holdsMeleeWeapon(aggressor)) {
             double before = pair.distanceAgo(now, CHARGE_WINDOW);
@@ -241,7 +295,7 @@ public final class HostileBotIntent {
         }
         if (charging) {
             if (++pair.chargeTicks >= CHARGE_SUSTAIN) {
-                HostileBotLedger.markPlayer(aggressor, victim, now, "charge");
+                HostileBotLedger.suspectPlayer(aggressor, victim, now, "charge");
             }
         } else {
             pair.chargeTicks = 0;

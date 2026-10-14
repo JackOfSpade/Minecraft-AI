@@ -169,6 +169,10 @@ public final class DangerWatcher {
     private record PosRecord(BlockPos pos, int sinceTick) {
     }
 
+    /** One already-loaded factual-aggression snapshot, shared by generic and PvP selection. */
+    private record ImmediateAggressors(List<LivingEntity> candidates, ServerPlayer owner) {
+    }
+
     enum HungerWarning {
         NONE,
         NO_SPRINT,
@@ -276,14 +280,20 @@ public final class DangerWatcher {
         // same scanBot invocation always sees the same world this list was computed from.
         List<LivingEntity> hostilePressure = new java.util.ArrayList<>(observableActiveHostilePressure(bot));
         Optional<Threat> threat = collectTopThreat(bot, hostilePressure);
-        // A vanilla Mob target is a factual aggro signal, but must still have an unobstructed
-        // physical line from the companion before it can own local combat. This deliberately
-        // has no view-cone/facing test: an aggressor behind Moss is valid, while one behind a
-        // terrain wall cannot repeatedly preempt follow or make Moss fight through that wall.
-        Optional<LivingEntity> aggroTarget = immediateAggressor(bot)
-                .or(() -> Optional.ofNullable(pvpAggressors.get(bot.getUUID()))
-                        .filter(candidate -> isAggroTargetingBotOrOwner(bot, candidate)))
-                .filter(candidate -> hasOmnidirectionalCombatLine(bot, candidate));
+        // A vanilla Mob target is a factual aggro signal, but it is not a substitute for the
+        // companion's perception boundary. A direct hit teaches CreatureSenses immediately;
+        // otherwise the mob must be noticed before it can own local combat. Once acquired, the
+        // physical combat-line check deliberately has no view-cone/facing test: an aggressor
+        // behind Moss is valid, while one behind terrain cannot repeatedly preempt follow or
+        // make Moss fight through that wall.
+        ImmediateAggressors aggressorSnapshot = immediateAggressors(bot);
+        Optional<LivingEntity> retainedPvpAggressor = Optional.ofNullable(pvpAggressors.get(bot.getUUID()))
+                .filter(candidate -> isAggroTargetingBotOrOwner(bot, candidate))
+                .filter(candidate -> isAdmittedCombatAggressor(bot, candidate));
+        Optional<LivingEntity> aggroTarget = nearestAdmittedAggressor(bot, aggressorSnapshot)
+                .or(() -> retainedPvpAggressor);
+        List<LivingEntity> pvpPlayerAggressors = selectPvpPlayerAggressors(
+                bot, aggressorSnapshot, retainedPvpAggressor);
         if (threat.isEmpty() && aggroTarget.isPresent()) {
             LivingEntity aggressor = aggroTarget.get();
             hostilePressure.add(aggressor);
@@ -291,6 +301,14 @@ public final class DangerWatcher {
                     aggressor, aggressor.blockPosition()));
         }
         Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
+        // An ordinary melee hostile belongs to FollowEscort even before the follower reaches
+        // strike range: following past it is the promised escort stance. It must not, however,
+        // mask a concurrent drawn marked-PvP opponent, evade-only mob, explosive, boss, or
+        // last-resort health emergency. Promote that already observed escalation candidate before
+        // any of the common threat branches below decide who owns the tick; this deliberately
+        // performs no second entity query.
+        threat = promoteFollowEscalationThreat(
+                bot, active, threat, hostilePressure, aggroTarget, pvpPlayerAggressors);
         if (active.filter(FollowTask.class::isInstance).isPresent()) {
             // A retained follow is running again (or the player explicitly started a fresh one),
             // so a later combat episode deserves its own concise notification.
@@ -534,14 +552,25 @@ public final class DangerWatcher {
         // stays on the deterministic CombatTask: the bridge can report itself active for mobs
         // while doing no attacks, which leaves the companion's follow task paused under fire.
         boolean lowHealthRecovery = bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp();
-        Optional<LivingEntity> pvpPlayerAggressor = aggroTarget
-                .filter(DangerWatcher::isPvpBotPlayerAggressor)
-                .filter(target -> !CombatCore.isMeleeForbiddenThreat(target));
+        // A follow's escort retains ordinary melee pressure, including a marked foreign player
+        // who hit its owner, even before that player enters literal strike range. Factual aggro
+        // makes the danger prompt, not a reason to revoke the escort stance. Keep this answer
+        // shared by the optional PvP bridge and deterministic dispatch so neither path can pause
+        // follow behind the other's back; emergencies above still make followKeepsThreat false.
+        boolean followKeepsCurrentThreat = threat
+                .map(top -> followKeepsThreat(server, bot, active, top))
+                .orElse(false);
+        // Keep the bridge target coupled to the final arbitration result. In particular, when a
+        // farther marked player displaced an escortable near player, PvP BOT must receive that
+        // same unescortable target rather than reselecting the nearby one by distance alone.
+        Optional<LivingEntity> pvpPlayerAggressor = selectPvpBridgeAggressor(
+                bot, active, threat, pvpPlayerAggressors);
         if (retreatFollowMode || lowHealthRecovery) {
             PvpBotCombatBrain.INSTANCE.release(bot);
             pvpAggressors.remove(bot.getUUID());
         } else if (pvpPlayerAggressor.isPresent()
                 && PvpBotCombatBrain.INSTANCE.available()
+                && !followKeepsCurrentThreat
                 // A deterministic safety fallback has already taken ownership after a prior bridge
                 // refusal. Do not let a failed optional handoff repeatedly cancel its route (and
                 // restart weapon selection) every danger scan. An already-active bridge is still
@@ -586,7 +615,7 @@ public final class DangerWatcher {
             if (top.severity().ordinal() >= Threat.Severity.MEDIUM.ordinal()
                     && shouldAssignThreatTask(bot, active, top)
                     && canAssignThreatTask(server, bot, top)
-                    && (aggroTarget.isPresent() || !followKeepsThreat(server, bot, active, top))) {
+                    && !followKeepsCurrentThreat) {
                 Task task = decideCombatOrEvade(bot, top, canAttemptShelter(server, bot), hostilePressure);
                 boolean trapped = trappedBackoff(server, bot, task);
                 if (trapped) {
@@ -842,26 +871,26 @@ public final class DangerWatcher {
     /** The active task is an ordinary (non-safety) follow and the follow keeps its escort-only stance (config follow.escortOnly). */
     private static boolean isEscortFollow(AIPlayerEntity bot, Optional<Task> active) {
         return active.isPresent()
-                && active.get() instanceof FollowTask
+                && active.get() instanceof FollowTask follow
+                && follow.ranLandEscortThisTick(bot)
                 && MinecraftAiConfig.get().behaviour().followOrDefaults().escortOnlyEnabled()
                 && !TaskManager.INSTANCE.activeOrigin(bot).map(TaskOrigin::safety).orElse(false);
     }
 
     /**
-     * R4: a bot that follows a player does not stop following for an ordinary hostile: the escort (FollowEscort) knocks back whatever
-     * is in reach and the follow pace sprints while anyone is under attack. Low health, creepers,
-     * bosses, a hostile that could kill the bot in two hits, lava, drowning and falling take priority.
+     * R4: a bot that follows a player does not stop following for ordinary melee pressure: the
+     * escort ({@link FollowEscort}) strikes only once an enemy enters its literal melee envelope,
+     * while the follow pace keeps moving. Range and a blocked physical line therefore govern
+     * swinging, not task ownership. Ordinary ranged mobs remain with the reactive follow shield;
+     * a marked foreign player actively presenting a ranged weapon, evade-only mobs, creepers,
+     * bosses, low health and a hostile that could kill the bot in two hits remain owned by the
+     * normal safety dispatcher; lava, drowning and falling already use non-hostile threat types
+     * and retain priority.
      */
     private boolean followKeepsThreat(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active, Threat top) {
         if (!isEscortFollow(bot, active)
                 || top.type() != Threat.Type.HOSTILE
-                || top.entity() == null
-                || top.entity() instanceof Creeper
-                || bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()
-                || shouldStartLastResortShelter(bot, top)) {
-            return false;
-        }
-        if (CombatCore.isBossThreat(top.entity())) {
+                || !followMayRetainOrdinaryHostile(bot, top.entity())) {
             return false;
         }
         int now = server.getTickCount();
@@ -871,6 +900,65 @@ public final class DangerWatcher {
                     "distance", Math.round(bot.distanceTo(top.entity()) * 10.0D) / 10.0D, "hp", (int) bot.getHealth());
         }
         return true;
+    }
+
+    /**
+     * Whether an ordinary hostile may leave an active land follow in charge. This deliberately is
+     * broader than {@link FollowEscort#canEngage(AIPlayerEntity, LivingEntity)}: the latter is a
+     * literal, same-tick swing check (range, perception, and physical line), while a harmless
+     * melee pursuer outside that envelope is exactly what follow is meant to pass without turning
+     * aside. Only hazards that require a different safety owner revoke the escort stance.
+     */
+    private static boolean followMayRetainOrdinaryHostile(AIPlayerEntity bot, LivingEntity entity) {
+        if (entity == null
+                || !entity.isAlive()
+                || entity instanceof Creeper
+                || CombatCore.isBossThreat(entity)
+                || CombatCore.isMeleeForbiddenThreat(entity)
+                || CombatCore.isDrawnRangedForeignBot(entity)
+                || bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()) {
+            return false;
+        }
+        return !shouldStartLastResortShelter(bot, hostileThreat(entity));
+    }
+
+    /**
+     * A primary ordinary melee threat does not suppress a simultaneous escalation hazard. All
+     * candidates were collected earlier in this same scan; the admitted raw/PvP aggressor is
+     * included only when the pressure query did not already contain it.
+     */
+    private static Optional<Threat> promoteFollowEscalationThreat(AIPlayerEntity bot, Optional<Task> active,
+                                                                    Optional<Threat> current,
+                                                                    List<LivingEntity> hostilePressure,
+                                                                    Optional<LivingEntity> aggroTarget,
+                                                                    List<LivingEntity> pvpPlayerAggressors) {
+        if (!isEscortFollow(bot, active)
+                || current.filter(top -> top.type() == Threat.Type.HOSTILE
+                        && followMayRetainOrdinaryHostile(bot, top.entity())).isEmpty()) {
+            return current;
+        }
+        List<LivingEntity> candidates = new java.util.ArrayList<>(hostilePressure);
+        aggroTarget.filter(candidate -> !candidates.contains(candidate)).ifPresent(candidates::add);
+        pvpPlayerAggressors.stream()
+                .filter(candidate -> !candidates.contains(candidate))
+                .forEach(candidates::add);
+        Comparator<LivingEntity> priority = Comparator
+                .comparing((LivingEntity entity) -> !(entity instanceof Creeper || CombatCore.isBossThreat(entity)))
+                .thenComparing(entity -> !(CombatCore.isMeleeForbiddenThreat(entity) || CombatCore.isLongRangeDanger(entity)))
+                .thenComparingDouble(bot::distanceTo);
+        return candidates.stream()
+                .filter(LivingEntity::isAlive)
+                .filter(entity -> !followMayRetainOrdinaryHostile(bot, entity))
+                .min(priority)
+                .map(DangerWatcher::hostileThreat)
+                .or(() -> current);
+    }
+
+    private static Threat hostileThreat(LivingEntity entity) {
+        Threat.Severity severity = entity instanceof Creeper || CombatCore.isBossThreat(entity)
+                ? Threat.Severity.HIGH
+                : Threat.Severity.MEDIUM;
+        return new Threat(Threat.Type.HOSTILE, severity, entity, entity.blockPosition());
     }
 
     private boolean maybeRegroup(AIPlayerEntity bot, Optional<Task> active) {
@@ -1586,22 +1674,37 @@ public final class DangerWatcher {
      * The surface teleport is denied (strict survival) or there is no open sky above, so the trapped bot answers the way a player in a
      * dark pocket does: it places a torch if it has one, crafts torches from coal and sticks first if it can, and otherwise digs a stair
      * up out of the dark ({@link DigOutTask}), which ends in a lit cell or under open sky and so lights nothing on the surface. A carried
-     * torch is now a direct, ray-reachable placement that leaves the current task alone; only crafting or digging needs a safety task.
-     * With automatic lighting switched off it only says so.
+     * torch can be placed directly for an idle bot.  A trapped move task is paused beneath an automatic light-area task so the normal
+     * completion path can resume it after the cell is safe. With automatic lighting switched off it only says so.
      */
     private boolean answerDarkTrapWithoutTeleport(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active,
                                                   BlockPos feet, DarkTrapResponse response) {
         if (TaskManager.INSTANCE.isUserPaused(bot)) {
             return false; // a paused bot starts no work of its own; it is looked at again once resumed
         }
-        darkTrapAnswers.put(bot.getUUID(), new DarkTrapAnswer(feet, response));
+        // A carried torch is an asynchronous physical attempt when a move is paused below
+        // LightAreaTask. Record the other terminal answers now, but leave LIGHT unrecorded until
+        // the world is actually no longer dark. Otherwise an unplaceable first attempt would
+        // suppress every later recovery attempt in the same pocket.
+        if (response != DarkTrapResponse.LIGHT) {
+            darkTrapAnswers.put(bot.getUUID(), new DarkTrapAnswer(feet, response));
+        }
         BotLog.danger(bot, "dark_trap_response", "response", response, "at", feet.toShortString());
         if (response == DarkTrapResponse.LIGHT) {
-            // Never pause useful work merely to route toward a torch mount. The passive helper can
-            // interact only with a floor the bot can already reach with a real vanilla ray and
-            // leaves the route, held slot, and aim intact. If there is no local mount, normal
-            // walking continues and the deterministic background pass tries again at its next
-            // safe boundary.
+            // maybeEscapeDarkTrap only reaches an active move task after it has proved stuck.
+            // Give that interrupted route a normal safety lifecycle rather than silently spending
+            // a torch: the dedicated task prioritizes this occupied dark cell, records its one
+            // placement, and TaskManager resumes the move.
+            if (active.isPresent()) {
+                String reason = "dark_trap_light";
+                TaskManager.INSTANCE.pauseFor(bot, reason);
+                TaskManager.INSTANCE.assign(bot, LightAreaTask.automaticDarkTrap(),
+                        TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, reason));
+                return true;
+            }
+            // With no task to resume, a direct ray-reachable placement remains the smallest safe
+            // response. If there is no local mount, the ordinary idle lighting reflex retries at
+            // its next boundary.
             AutomaticLighting.Placement placement = AutomaticLighting.tryPlaceTorchAtFeetPassively(bot);
             BotLog.danger(bot, "dark_trap_passive_light", "result", placement, "at", feet.toShortString());
             return false;
@@ -1760,15 +1863,15 @@ public final class DangerWatcher {
     }
 
     /**
-     * Finds a loaded mob whose own vanilla goal targets this companion or its owner, or a marked foreign PvP bot whose
-     * qualifying act targeted either protected victim. The foreign-PvP-bot relation itself uses its companion-only 360-degree
-     * physical sight check; this finder otherwise does not consult perception, recent damage, or the old owner-radius leash.
+     * Builds one loaded snapshot of factual vanilla/PvP aggression. Consumers deliberately select
+     * both a general nearest target and a separately retained PvP target from this same list: a
+     * nearby ordinary mob must not hide a marked player that the escort cannot answer.
      */
-    private static Optional<LivingEntity> immediateAggressor(AIPlayerEntity bot) {
+    private static ImmediateAggressors immediateAggressors(AIPlayerEntity bot) {
         if (bot.level().getServer() == null) {
-            return Optional.empty();
+            return new ImmediateAggressors(List.of(), null);
         }
-        net.minecraft.server.level.ServerPlayer owner = AIPlayerManager.INSTANCE.ownerOf(bot)
+        ServerPlayer owner = AIPlayerManager.INSTANCE.ownerOf(bot)
                 .map(id -> bot.level().getServer().getPlayerList().getPlayer(id))
                 .filter(candidate -> candidate.isAlive() && candidate.level() == bot.level())
                 .orElse(null);
@@ -1785,15 +1888,67 @@ public final class DangerWatcher {
                 .filter(player -> HostileBotLedger.isMarkedAgainst(bot, player))
                 .map(player -> (LivingEntity) player)
                 .toList());
-        final net.minecraft.server.level.ServerPlayer liveOwner = owner;
-        return candidates.stream()
+        return new ImmediateAggressors(candidates.stream()
                 .filter(LivingEntity::isAlive)
                 .distinct()
+                .toList(), owner);
+    }
+
+    /** The normal deterministic target remains the nearest fully admitted factual aggressor. */
+    private static Optional<LivingEntity> nearestAdmittedAggressor(AIPlayerEntity bot,
+                                                                     ImmediateAggressors snapshot) {
+        return snapshot.candidates().stream()
+                .filter(candidate -> isAdmittedCombatAggressor(bot, candidate))
                 .min(Comparator.comparingDouble(entity -> {
                     double botDistance = bot.distanceToSqr(entity);
-                    double ownerDistance = liveOwner == null ? Double.MAX_VALUE : liveOwner.distanceToSqr(entity);
+                    double ownerDistance = snapshot.owner() == null
+                            ? Double.MAX_VALUE
+                            : snapshot.owner().distanceToSqr(entity);
                     return Math.min(botDistance, ownerDistance);
                 }));
+    }
+
+    /**
+     * Preserve every admitted marked player until escort arbitration completes. Reducing this to
+     * one nearest entry here lets an escortable attacker hide a farther attacker that needs an
+     * actual combat task or PvP bridge.
+     */
+    private static List<LivingEntity> selectPvpPlayerAggressors(AIPlayerEntity bot,
+                                                                  ImmediateAggressors snapshot,
+                                                                  Optional<LivingEntity> retained) {
+        List<LivingEntity> candidates = new java.util.ArrayList<>(snapshot.candidates());
+        retained.filter(candidate -> !candidates.contains(candidate)).ifPresent(candidates::add);
+        return candidates.stream()
+                .filter(DangerWatcher::isPvpBotPlayerAggressor)
+                .filter(candidate -> isAggroTargetingBotOrOwner(bot, candidate))
+                .filter(candidate -> isAdmittedCombatAggressor(bot, candidate))
+                .filter(candidate -> !CombatCore.isMeleeForbiddenThreat(candidate))
+                .toList();
+    }
+
+    /**
+     * Select a bridge target only after the ordinary threat/follow decision is known. A promoted
+     * marked player must remain the bridge target; while land escort is active, only an escalation
+     * player may bridge at all, so a distant ordinary melee player cannot preempt follow before it
+     * becomes a literal escort strike candidate.
+     */
+    private static Optional<LivingEntity> selectPvpBridgeAggressor(AIPlayerEntity bot,
+                                                                     Optional<Task> active,
+                                                                     Optional<Threat> threat,
+                                                                     List<LivingEntity> candidates) {
+        boolean escortFollow = isEscortFollow(bot, active);
+        Optional<LivingEntity> selectedThreat = threat.map(Threat::entity)
+                .filter(candidates::contains);
+        if (selectedThreat.filter(candidate -> !escortFollow
+                || !followMayRetainOrdinaryHostile(bot, candidate)).isPresent()) {
+            return selectedThreat;
+        }
+        if (escortFollow) {
+            return candidates.stream()
+                    .filter(candidate -> !followMayRetainOrdinaryHostile(bot, candidate))
+                    .min(Comparator.comparingDouble(bot::distanceTo));
+        }
+        return candidates.stream().min(Comparator.comparingDouble(bot::distanceTo));
     }
 
     private static boolean isAggroTargetingOwner(AIPlayerEntity bot, LivingEntity aggressor) {
@@ -1822,6 +1977,16 @@ public final class DangerWatcher {
             return true;
         }
         return isAggroTargetingOwner(bot, aggressor);
+    }
+
+    /**
+     * A factual target relation alone is insufficient to seize the combat task. In particular,
+     * an unseen or terrain-blocked raw mob is discarded before nearest-target selection, while a
+     * retained marked player receives this same physical-line admission independently.
+     */
+    private static boolean isAdmittedCombatAggressor(AIPlayerEntity bot, LivingEntity candidate) {
+        return (!(candidate instanceof Mob) || SharedVision.seenByBotOrOwner(bot, candidate))
+                && hasOmnidirectionalCombatLine(bot, candidate);
     }
 
     private static boolean shouldAssignThreatTask(AIPlayerEntity bot, Optional<Task> active, Threat threat) {

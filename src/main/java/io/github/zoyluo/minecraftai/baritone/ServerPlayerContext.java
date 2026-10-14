@@ -1,6 +1,5 @@
 package io.github.zoyluo.minecraftai.baritone;
 
-import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.cache.IWorldData;
 import baritone.api.pathing.calc.IPath;
@@ -14,9 +13,12 @@ import baritone.api.utils.Rotation;
 import baritone.behavior.LookBehavior;
 import baritone.utils.accessor.IClientChunkProvider;
 import io.github.zoyluo.minecraftai.MinecraftAiConfig;
+import io.github.zoyluo.minecraftai.action.FallSafety;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.mining.assist.BotEdits;
 import io.github.zoyluo.minecraftai.mode.ObservableWorldQuery;
+import io.github.zoyluo.minecraftai.navigation.NavRoute;
+import io.github.zoyluo.minecraftai.navigation.NavRouteRules;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
@@ -60,13 +62,32 @@ public final class ServerPlayerContext implements IPlayerContext {
     /** Written on the server thread, read from any thread (see {@link #entities()}). */
     private volatile List<Entity> observedEntities = List.of();
     private int observedAtTick = -1;
+    /**
+     * Route-bound movement switches and conservative dry-fall ceiling. Baritone's settings object
+     * is global, but its patched water-bucket decision is per player; publishing these together
+     * at admission prevents a later route or config reload from changing a calculation already
+     * owned by this bot.
+     */
+    private volatile NavigationLimits navigationLimits = NavigationLimits.from(MinecraftAiConfig.get().nav());
+    /**
+     * A server-thread-only candidate used while a synchronous admission builds its immutable
+     * CalculationContext. It is deliberately thread-local: worker calculations can observe only
+     * {@link #navigationLimits}, which changes after a route has been accepted.
+     */
+    private final ThreadLocal<NavigationLimits> planningNavigationLimits = new ThreadLocal<>();
+    /**
+     * The terrain/permission half of a synchronous candidate admission. Like the candidate
+     * limits, it is visible only while the server thread constructs the planner snapshot; the
+     * vendored BlockStateInterface freezes it before a worker can read it.
+     */
+    private final ThreadLocal<CandidateRouteAuthority> planningRouteAuthority = new ThreadLocal<>();
     /** What this bot may do to the world; read by the cost model on the server thread and on workers. */
     private volatile BaritonePolicy policy = BaritonePolicy.UNRESTRICTED;
     /**
      * The only terrain snapshot Baritone is allowed to inspect for an active route. It is immutable
      * and replaced atomically, so search workers never see a partly-filled observation map.
      */
-    private volatile ObservedNavigationFence observationFence = ObservedNavigationFence.empty();
+    private volatile NavigationBoundary navigationBoundary = NavigationBoundary.empty();
     /** Bounded same-dimension memory retained between routes; it is never exposed to Baritone while idle. */
     private volatile ObservedNavigationFence observationMemory = ObservedNavigationFence.empty();
     /**
@@ -76,16 +97,48 @@ public final class ServerPlayerContext implements IPlayerContext {
      */
     private volatile boolean waterAllowed;
     /**
-     * The one intentionally coordinate-aware navigation grant: a full-chunk snapshot captured on the server thread for a verified
-     * owner-follow route. It exposes exact states only from chunks that were already FULL at capture time; it never loads a chunk
-     * and, unlike a blanket allow flag, cannot fall through to Baritone's cached regions.
-     */
-    private volatile LoadedChunkSnapshot ownerFollowSnapshot;
-    /**
      * A pre-execution fence refusal emitted by the vendored executor. The driver consumes it in
      * the same PRE tick and revokes the route before another executor can take over.
      */
     private volatile String navigationPathSafetyFailure;
+
+    /**
+     * One atomic worker-visible snapshot of route evidence and its optional physical movement
+     * boundary. Publishing them together prevents a planner worker from seeing a fresh fence
+     * with a stale (or absent) local-site constraint.
+     */
+    private record NavigationBoundary(ObservedNavigationFence fence, NavRoute.MovementBoundary movementBoundary,
+                                      LoadedChunkSnapshot ownerFollowSnapshot) {
+        private NavigationBoundary {
+            fence = java.util.Objects.requireNonNull(fence, "fence");
+        }
+
+        static NavigationBoundary empty() {
+            return new NavigationBoundary(ObservedNavigationFence.empty(), null, null);
+        }
+
+        boolean allowsColumn(int x, int z) {
+            return movementBoundary == null || movementBoundary.allowsColumn(x, z);
+        }
+
+        boolean allowsFeet(BetterBlockPos position) {
+            return position != null && (movementBoundary == null
+                    || movementBoundary.allowsFeet(position.getX(), position.getY(), position.getZ()));
+        }
+
+        LoadedChunkSnapshot ownerFollowSnapshot(AIPlayerEntity player) {
+            return ownerFollowSnapshot != null && player.level() instanceof net.minecraft.server.level.ServerLevel serverLevel
+                    && ownerFollowSnapshot.belongsTo(serverLevel) ? ownerFollowSnapshot : null;
+        }
+    }
+
+    /** Candidate terrain and permissions that have not replaced the live route yet. */
+    private record CandidateRouteAuthority(NavigationBoundary boundary, BaritonePolicy policy, boolean waterAllowed) {
+        private CandidateRouteAuthority {
+            boundary = java.util.Objects.requireNonNull(boundary, "boundary");
+            policy = java.util.Objects.requireNonNull(policy, "policy");
+        }
+    }
 
     public ServerPlayerContext(IBaritone baritone, Supplier<? extends AIPlayerEntity> bot) {
         this.baritone = baritone;
@@ -150,7 +203,7 @@ public final class ServerPlayerContext implements IPlayerContext {
                 observed.add(item);
             }
         }
-        if (BaritoneAPI.getSettings().avoidance.value) {
+        if (BaritoneSettings.mobAvoidanceEnabled(self)) {
             // Baritone's mob avoidance (Avoidance#create) reads mobs from this very list, so it can only ever steer around what the
             // bot observes: a hostile mob in range and in line of sight (canNoticeCreature). Hostile only: a cow is not a threat, and
             // this is the whole cost of the feature (one entity query and a few rays per refresh, only while the bot is driven).
@@ -200,14 +253,18 @@ public final class ServerPlayerContext implements IPlayerContext {
         // This method is called by playerFeet from both server and Baritone worker threads. It
         // therefore uses the same immutable evidence boundary as the planner rather than doing a
         // special direct chunk lookup that could leak a hidden slab/floor into navigation.
-        ObservedNavigationFence fence = observationFence;
+        NavigationBoundary boundary = effectiveNavigationBoundary();
+        if (!boundary.allowsColumn(pos.getX(), pos.getZ())) {
+            return Blocks.BEDROCK.defaultBlockState();
+        }
+        ObservedNavigationFence fence = boundary.fence();
         BlockState observed = fenceMatchesCurrentDimension(fence) ? fence.stateAt(pos) : null;
         return observed == null ? Blocks.BEDROCK.defaultBlockState() : observed;
     }
 
     /** Installs an admitted route's immutable observed terrain. Server thread only. */
     public void setObservationFence(ObservedNavigationFence fence) {
-        setObservationFence(fence, false);
+        setObservationFence(fence, false, null);
     }
 
     /**
@@ -215,11 +272,95 @@ public final class ServerPlayerContext implements IPlayerContext {
      * observation fence; every other route clears that grant immediately.
      */
     public void setObservationFence(ObservedNavigationFence fence, boolean ownerFollow) {
-        observationFence = java.util.Objects.requireNonNull(fence, "fence");
+        setObservationFence(fence, ownerFollow, null);
+    }
+
+    /**
+     * Installs an evidence fence and its optional immutable physical movement boundary as one
+     * worker-visible value. The boundary applies before either the ordinary fence or the special
+     * owner-follow snapshot may expose a terrain cell.
+     */
+    public void setObservationFence(ObservedNavigationFence fence, boolean ownerFollow,
+                                    NavRoute.MovementBoundary movementBoundary) {
+        navigationBoundary = navigationBoundary(fence, ownerFollow, movementBoundary);
         observationMemory = fence;
-        ownerFollowSnapshot = ownerFollow && player().level() instanceof net.minecraft.server.level.ServerLevel serverLevel
-                ? LoadedChunkSnapshot.capture(serverLevel) : null;
         navigationPathSafetyFailure = null;
+    }
+
+    /**
+     * Makes a candidate's immutable terrain and permissions visible only while its synchronous
+     * calculation is being built. The vendor snapshot API copies this authority into the BSI, so
+     * a worker never relies on this server-thread local after the supplier returns.
+     */
+    <T> T withCandidateRouteAuthority(ObservedNavigationFence fence, NavRoute route,
+                                      BaritonePolicy candidatePolicy, boolean candidateWaterAllowed,
+                                      Supplier<T> calculation) {
+        try (CandidateRouteAuthorityScope ignored = openCandidateRouteAuthority(
+                fence, route, candidatePolicy, candidateWaterAllowed)) {
+            return java.util.Objects.requireNonNull(calculation, "calculation").get();
+        }
+    }
+
+    /** Opens the server-thread candidate scope for a synchronous admission. */
+    CandidateRouteAuthorityScope openCandidateRouteAuthority(ObservedNavigationFence fence, NavRoute route,
+                                                              BaritonePolicy candidatePolicy,
+                                                              boolean candidateWaterAllowed) {
+        if (!minecraft().isSameThread()) {
+            throw new IllegalStateException("candidate route authority must be scoped on the server thread");
+        }
+        java.util.Objects.requireNonNull(route, "route");
+        CandidateRouteAuthority previous = planningRouteAuthority.get();
+        NavigationBoundary boundary = navigationBoundary(fence, route.shape() == NavRoute.Shape.OWNER_FOLLOW,
+                route.movementBoundary());
+        planningRouteAuthority.set(new CandidateRouteAuthority(boundary, candidatePolicy, candidateWaterAllowed));
+        return new CandidateRouteAuthorityScope(previous);
+    }
+
+    /** Restores the exact enclosing candidate scope, including a nested admission when present. */
+    final class CandidateRouteAuthorityScope implements AutoCloseable {
+        private final CandidateRouteAuthority previous;
+        private boolean closed;
+
+        private CandidateRouteAuthorityScope(CandidateRouteAuthority previous) {
+            this.previous = previous;
+        }
+
+        @Override
+        public void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            if (previous == null) {
+                planningRouteAuthority.remove();
+            } else {
+                planningRouteAuthority.set(previous);
+            }
+        }
+    }
+
+    /** Captures a route boundary with its owner-follow snapshot only on the server thread. */
+    private NavigationBoundary navigationBoundary(ObservedNavigationFence fence, boolean ownerFollow,
+                                                   NavRoute.MovementBoundary movementBoundary) {
+        ObservedNavigationFence observed = java.util.Objects.requireNonNull(fence, "fence");
+        LoadedChunkSnapshot ownerSnapshot = ownerFollow && player().level() instanceof net.minecraft.server.level.ServerLevel serverLevel
+                ? LoadedChunkSnapshot.capture(serverLevel) : null;
+        return new NavigationBoundary(observed, movementBoundary, ownerSnapshot);
+    }
+
+    private NavigationBoundary effectiveNavigationBoundary() {
+        CandidateRouteAuthority candidate = planningRouteAuthority.get();
+        return candidate == null ? navigationBoundary : candidate.boundary();
+    }
+
+    private BaritonePolicy effectivePolicy() {
+        CandidateRouteAuthority candidate = planningRouteAuthority.get();
+        return candidate == null ? policy : candidate.policy();
+    }
+
+    private boolean effectiveWaterAllowed() {
+        CandidateRouteAuthority candidate = planningRouteAuthority.get();
+        return candidate == null ? waterAllowed : candidate.waterAllowed();
     }
 
     /** Applies the active route's water rule to both planner and executor snapshot reads. */
@@ -229,7 +370,7 @@ public final class ServerPlayerContext implements IPlayerContext {
 
     /** The active fence; safe to hand to the server-thread refresh boundary. */
     public ObservedNavigationFence observationFence() {
-        return observationFence;
+        return effectiveNavigationBoundary().fence();
     }
 
     /** The last bounded observation memory, used to admit a later remembered route. */
@@ -239,17 +380,15 @@ public final class ServerPlayerContext implements IPlayerContext {
 
     /** Stops every future planner/executor lookup immediately while retaining bounded evidence for a later route. */
     public void clearObservationFence() {
-        observationFence = ObservedNavigationFence.empty();
-        ownerFollowSnapshot = null;
+        navigationBoundary = NavigationBoundary.empty();
         waterAllowed = false;
         navigationPathSafetyFailure = null;
     }
 
     /** Lifecycle boundary (death, dimension change, bot removal): no observation crosses it. */
     public void clearObservationMemory() {
-        observationFence = ObservedNavigationFence.empty();
+        navigationBoundary = NavigationBoundary.empty();
         observationMemory = ObservedNavigationFence.empty();
-        ownerFollowSnapshot = null;
         waterAllowed = false;
         navigationPathSafetyFailure = null;
     }
@@ -260,21 +399,31 @@ public final class ServerPlayerContext implements IPlayerContext {
      */
     @Override
     public boolean allowNavigationCell(int x, int y, int z) {
-        LoadedChunkSnapshot ownerSnapshot = ownerFollowSnapshot();
+        NavigationBoundary boundary = effectiveNavigationBoundary();
+        if (!boundary.allowsColumn(x, z)) {
+            return false;
+        }
+        LoadedChunkSnapshot ownerSnapshot = boundary.ownerFollowSnapshot(player());
         if (ownerSnapshot != null) {
             // The paired navigationCellState() below supplies the state from this exact snapshot. Returning true only here makes
             // a missing/evicted column virtual bedrock before BlockStateInterface can consult its cached-region fallback.
             BlockState state = ownerSnapshot.stateAt(x, y, z);
             return navigationStateAllowed(state);
         }
-        ObservedNavigationFence fence = observationFence;
+        ObservedNavigationFence fence = boundary.fence();
         return fenceMatchesCurrentDimension(fence) && navigationStateAllowed(fence.stateAt(x, y, z));
     }
 
     /** Patch 0018 consumes this immutable state instead of re-reading a past observation from the live world. */
     @Override
     public BlockState navigationCellState(int x, int y, int z) {
-        LoadedChunkSnapshot ownerSnapshot = ownerFollowSnapshot();
+        NavigationBoundary boundary = effectiveNavigationBoundary();
+        if (!boundary.allowsColumn(x, z)) {
+            // BlockStateInterface may ask for a state before its paired allowNavigationCell
+            // callback. Returning virtual bedrock keeps either lookup order fail-closed.
+            return Blocks.BEDROCK.defaultBlockState();
+        }
+        LoadedChunkSnapshot ownerSnapshot = boundary.ownerFollowSnapshot(player());
         if (ownerSnapshot != null) {
             // Never return null while a direct snapshot is active. The snapshot can be refreshed
             // between BlockStateInterface's state read and its allowNavigationCell check (and a
@@ -286,7 +435,7 @@ public final class ServerPlayerContext implements IPlayerContext {
             return state == null || !navigationStateAllowed(state)
                     ? Blocks.BEDROCK.defaultBlockState() : state;
         }
-        ObservedNavigationFence fence = observationFence;
+        ObservedNavigationFence fence = boundary.fence();
         if (!fenceMatchesCurrentDimension(fence)) {
             return null;
         }
@@ -300,9 +449,54 @@ public final class ServerPlayerContext implements IPlayerContext {
 
     /** Water permission never makes lava navigable; dry routes additionally treat water as unavailable terrain. */
     private boolean navigationStateAllowed(BlockState state) {
+        return navigationStateAllowed(state, effectiveWaterAllowed());
+    }
+
+    private static boolean navigationStateAllowed(BlockState state, boolean allowWater) {
         return state != null
                 && !state.getFluidState().is(FluidTags.LAVA)
-                && (waterAllowed || !state.getFluidState().is(FluidTags.WATER));
+                && (allowWater || !state.getFluidState().is(FluidTags.WATER));
+    }
+
+    /**
+     * Freezes the exact cell authority into a CalculationContext's BlockStateInterface. The
+     * context itself remains live for execution, but an asynchronous admission worker may only
+     * use this immutable copy, never a replacement route's fence, water rule, or local boundary.
+     */
+    @Override
+    public IPlayerContext.NavigationSnapshot captureNavigationSnapshot() {
+        if (!minecraft().isSameThread()) {
+            throw new IllegalStateException("navigation snapshots must be captured on the server thread");
+        }
+        NavigationBoundary boundary = effectiveNavigationBoundary();
+        LoadedChunkSnapshot ownerSnapshot = boundary.ownerFollowSnapshot(player());
+        ObservedNavigationFence fence = boundary.fence();
+        boolean fenceMatchesDimension = ownerSnapshot == null && fenceMatchesCurrentDimension(fence);
+        boolean allowWater = effectiveWaterAllowed();
+        return new IPlayerContext.NavigationSnapshot() {
+            @Override
+            public BlockState navigationCellState(int x, int y, int z) {
+                return capturedNavigationState(boundary, ownerSnapshot, fence, fenceMatchesDimension,
+                        allowWater, x, y, z);
+            }
+
+            @Override
+            public boolean allowNavigationCell(int x, int y, int z) {
+                return capturedNavigationState(boundary, ownerSnapshot, fence, fenceMatchesDimension,
+                        allowWater, x, y, z) != null;
+            }
+        };
+    }
+
+    private static BlockState capturedNavigationState(NavigationBoundary boundary, LoadedChunkSnapshot ownerSnapshot,
+                                                       ObservedNavigationFence fence, boolean fenceMatchesDimension,
+                                                       boolean allowWater, int x, int y, int z) {
+        if (!boundary.allowsColumn(x, z)) {
+            return null;
+        }
+        BlockState state = ownerSnapshot != null ? ownerSnapshot.stateAt(x, y, z)
+                : fenceMatchesDimension ? fence.stateAt(x, y, z) : null;
+        return navigationStateAllowed(state, allowWater) ? state : null;
     }
 
     /**
@@ -316,6 +510,12 @@ public final class ServerPlayerContext implements IPlayerContext {
             return false;
         }
         String failure = BaritoneNavigator.observedExecutionPathSafetyFailure(player(), path, firstMovement);
+        if (failure == null && !allowMovementBoundaryFootprints(path, firstMovement)) {
+            // The navigator normally catches this before it hands off a route. Keep the patched
+            // executor independently fail-closed when an asynchronous replacement reaches this
+            // callback first, without consulting the stateful per-click observation gate.
+            failure = NavRouteRules.MOVEMENT_BOUNDARY_REFUSED;
+        }
         if (failure == null && !allowPathFootprints(path, firstMovement)) {
             // MovementParkour can jump over a short gap without declaring the cells beneath the
             // arc as a source, destination, or block action. Keep the executor fail-closed even
@@ -332,6 +532,44 @@ public final class ServerPlayerContext implements IPlayerContext {
     }
 
     /**
+     * Verifies every pure Baritone body/action declaration against the atomically published
+     * local-site boundary. Feet honor the vertical floor; action cells intentionally use only
+     * their horizontal column so a legal ascent can operate on support below that floor.
+     */
+    private boolean allowMovementBoundaryFootprints(IPath path, int firstMovement) {
+        NavigationBoundary boundary = effectiveNavigationBoundary();
+        if (path == null || boundary.movementBoundary() == null) {
+            return true;
+        }
+        List<IMovement> movements = path.movements();
+        for (int index = Math.max(0, firstMovement); index < movements.size(); index++) {
+            IMovement movement = movements.get(index);
+            if (movement == null) {
+                return false;
+            }
+            List<? extends BetterBlockPos> movementCells = movement.getDeclaredMovementCells();
+            if (movementCells == null) {
+                return false;
+            }
+            for (BetterBlockPos movementCell : movementCells) {
+                if (!boundary.allowsFeet(movementCell)) {
+                    return false;
+                }
+            }
+            List<? extends BetterBlockPos> actionCells = movement.getDeclaredActionCells();
+            if (actionCells == null) {
+                return false;
+            }
+            for (BetterBlockPos actionCell : actionCells) {
+                if (actionCell == null || !boundary.allowsColumn(actionCell.getX(), actionCell.getZ())) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
      * Checks Baritone's one hidden-span movement. Ordinary movements expose their full cells to
      * the planner and executor callbacks; {@link MovementParkour} instead records no intermediate
      * cells even though it crosses a short cardinal arc. That arc must remain inside the admitted
@@ -341,6 +579,7 @@ public final class ServerPlayerContext implements IPlayerContext {
         if (path == null) {
             return true;
         }
+        NavigationBoundary boundary = effectiveNavigationBoundary();
         List<IMovement> movements = path.movements();
         int start = Math.max(0, firstMovement);
         for (int index = start; index < movements.size(); index++) {
@@ -348,12 +587,15 @@ public final class ServerPlayerContext implements IPlayerContext {
             // This callback runs on every PRE tick. Check only the movement about to execute;
             // later movements will be checked when they become current.  Ordinary Baritone
             // movements already expose their complete footprint through the navigation-cell
-            // callbacks used while planning.  Do not turn this water guard into a second
-            // footprint validator: ascent and descent legitimately use cells outside a simple
-            // source/destination support/body/head triple.  The guard is only the immediate
-            // dry-route invariant, read from the immutable admitted snapshot rather than the
-            // live world.
-            if (movement == null || (!waterAllowed && index == start
+            // callbacks used while planning. The circular route boundary additionally checks
+            // every movement's actual feet endpoints here; its convex circle contains an
+            // ordinary straight hop when both endpoints are inside, and MovementParkour's
+            // explicit cardinal span is checked below. Do not turn the dry-water guard into a
+            // second support/body/head validator: an ascent may legitimately read support below
+            // the lowest allowed feet layer.
+            if (movement == null || !boundary.allowsFeet(movement.getSrc())
+                    || !boundary.allowsFeet(movement.getDest())
+                    || (!effectiveWaterAllowed() && index == start
                     && !avoidsObservedWater(movement))
                     || (movement instanceof MovementParkour
                     && !allowParkourFootprint(movement.getSrc(), movement.getDest()))) {
@@ -386,11 +628,15 @@ public final class ServerPlayerContext implements IPlayerContext {
     }
 
     private BlockState observedNavigationState(int x, int y, int z) {
-        LoadedChunkSnapshot ownerSnapshot = ownerFollowSnapshot();
+        NavigationBoundary boundary = effectiveNavigationBoundary();
+        if (!boundary.allowsColumn(x, z)) {
+            return null;
+        }
+        LoadedChunkSnapshot ownerSnapshot = boundary.ownerFollowSnapshot(player());
         if (ownerSnapshot != null) {
             return ownerSnapshot.stateAt(x, y, z);
         }
-        ObservedNavigationFence fence = observationFence;
+        ObservedNavigationFence fence = boundary.fence();
         return fenceMatchesCurrentDimension(fence)
                 ? fence.stateAt(x, y, z) : null;
     }
@@ -462,30 +708,76 @@ public final class ServerPlayerContext implements IPlayerContext {
         return fence != null && fence.dimension().equals(BotEdits.dimensionKey(player().level()));
     }
 
-    /** The direct snapshot must not survive a level replacement even if teardown ordering is interrupted. */
-    private LoadedChunkSnapshot ownerFollowSnapshot() {
-        LoadedChunkSnapshot snapshot = ownerFollowSnapshot;
-        return snapshot != null && player().level() instanceof net.minecraft.server.level.ServerLevel serverLevel
-                && snapshot.belongsTo(serverLevel) ? snapshot : null;
-    }
-
     /** The bot's break/place permission. Applies to the next plan (a running path re-validates its costs every tick). */
     public void setPolicy(BaritonePolicy policy) {
         this.policy = java.util.Objects.requireNonNull(policy, "policy");
     }
 
     public BaritonePolicy policy() {
-        return policy;
+        return effectivePolicy();
+    }
+
+    /** Commits the immutable movement switches and dry-fall ceiling of an accepted route. Server thread only. */
+    NavigationLimits commitNavigationLimits(MinecraftAiConfig.Nav nav) {
+        NavigationLimits previous = navigationLimits;
+        navigationLimits = NavigationLimits.from(nav);
+        return previous;
+    }
+
+    /** Restores an earlier committed snapshot when the hand-off fails after process acceptance. */
+    void restoreNavigationLimits(NavigationLimits previous) {
+        navigationLimits = java.util.Objects.requireNonNull(previous, "previous");
+    }
+
+    /**
+     * Runs one synchronous candidate calculation without publishing it to worker threads or an
+     * already active route. Nested callers restore the enclosing candidate exactly.
+     */
+    <T> T withCandidateNavigationLimits(MinecraftAiConfig.Nav nav, Supplier<T> calculation) {
+        if (!minecraft().isSameThread()) {
+            throw new IllegalStateException("candidate navigation limits must be scoped on the server thread");
+        }
+        NavigationLimits previous = planningNavigationLimits.get();
+        planningNavigationLimits.set(NavigationLimits.from(nav));
+        try {
+            return java.util.Objects.requireNonNull(calculation, "calculation").get();
+        } finally {
+            if (previous == null) {
+                planningNavigationLimits.remove();
+            } else {
+                planningNavigationLimits.set(previous);
+            }
+        }
+    }
+
+    /** The caps used by the current calculation (candidate on the server thread, committed on workers). */
+    MinecraftAiConfig.BaritoneCaps navigationCaps() {
+        return effectiveNavigationLimits().caps;
+    }
+
+    /** The immutable caps of the active route, never a thread-local candidate. */
+    MinecraftAiConfig.BaritoneCaps committedNavigationCaps() {
+        return navigationLimits.caps;
+    }
+
+    /** The configured dry-fall ceiling of the current calculation, before body-health clamping. */
+    int navigationMaxSafeFall() {
+        return effectiveNavigationLimits().maxSafeFall;
+    }
+
+    private NavigationLimits effectiveNavigationLimits() {
+        NavigationLimits candidate = planningNavigationLimits.get();
+        return candidate == null ? navigationLimits : candidate;
     }
 
     @Override
     public boolean allowBreak() {
-        return policy.allowBreak();
+        return effectivePolicy().allowBreak();
     }
 
     @Override
     public boolean allowPlace() {
-        return policy.allowPlace();
+        return effectivePolicy().allowPlace();
     }
 
     /**
@@ -498,17 +790,60 @@ public final class ServerPlayerContext implements IPlayerContext {
     }
 
     /**
-     * Whether the bot may plan a fall broken by a water bucket (patch 0017): the switch (Baritone's setting, which follows
-     * {@code nav.baritone.waterBucketFall}) and a place where water does not evaporate. Baritone itself only excludes the Nether; the
-     * bucket click would be refused anywhere else water evaporates ({@link BaritoneWaterFall}), and a fall planned on it would be a fall to damage.
+     * Whether this bot may plan a fall broken by a water bucket (patch 0017). This deliberately
+     * reads this bot's route snapshot rather than Baritone's JVM-wide setting: another bot can
+     * start a route with a different capability set while this instance's calculation context is
+     * being built. Baritone itself only excludes the Nether; the bucket click would be refused
+     * anywhere else water evaporates ({@link BaritoneWaterFall}), and a fall planned on it would
+     * be a fall to damage.
      */
     @Override
     public boolean allowWaterBucketFall() {
-        if (!BaritoneAPI.getSettings().allowWaterBucketFall.value) {
+        if (!effectiveNavigationLimits().caps.waterBucketFallEnabled()) {
             return false;
         }
         AIPlayerEntity self = player();
         return !minecraft().isSameThread() || !BaritoneWaterFall.waterEvaporates(self, self.blockPosition());
+    }
+
+    /** Vendored Baritone reads these from the player context, never the JVM-wide mutable Settings object. */
+    @Override
+    public boolean allowNavigationParkour() {
+        return effectiveNavigationLimits().caps.parkourEnabled();
+    }
+
+    @Override
+    public boolean allowNavigationParkourPlace() {
+        return effectiveNavigationLimits().caps.parkourEnabled()
+                && effectiveNavigationLimits().caps.parkourPlaceEnabled();
+    }
+
+    @Override
+    public boolean allowNavigationParkourAscend() {
+        return effectiveNavigationLimits().caps.parkourEnabled()
+                && effectiveNavigationLimits().caps.parkourAscendEnabled();
+    }
+
+    @Override
+    public boolean allowNavigationVines() {
+        return effectiveNavigationLimits().caps.vinesEnabled();
+    }
+
+    @Override
+    public boolean allowNavigationMobAvoidance() {
+        return effectiveNavigationLimits().caps.mobAvoidanceEnabled();
+    }
+
+    @Override
+    public int navigationMaxFallHeightNoWater() {
+        return Math.min(effectiveNavigationLimits().maxSafeFall, FallSafety.maxNonLethalFall(player()));
+    }
+
+    @Override
+    public int navigationMaxFallHeightBucket() {
+        NavigationLimits limits = effectiveNavigationLimits();
+        int dry = navigationMaxFallHeightNoWater();
+        return limits.caps.waterBucketFallEnabled() ? Math.max(dry, limits.caps.maxBucketFall()) : dry;
     }
 
     @Override
@@ -524,5 +859,21 @@ public final class ServerPlayerContext implements IPlayerContext {
     @Override
     public HitResult objectMouseOver() {
         return RayTraceUtils.rayTraceTowards(player(), playerRotations(), playerController().getBlockReachDistance());
+    }
+
+    /** Immutable publication unit for the route authority that upstream otherwise stores globally. */
+    static final class NavigationLimits {
+        private final MinecraftAiConfig.BaritoneCaps caps;
+        private final int maxSafeFall;
+
+        private NavigationLimits(MinecraftAiConfig.BaritoneCaps caps, int maxSafeFall) {
+            this.caps = java.util.Objects.requireNonNull(caps, "caps");
+            this.maxSafeFall = Math.max(1, maxSafeFall);
+        }
+
+        private static NavigationLimits from(MinecraftAiConfig.Nav nav) {
+            java.util.Objects.requireNonNull(nav, "nav");
+            return new NavigationLimits(nav.baritoneCaps(), nav.maxSafeFall());
+        }
     }
 }

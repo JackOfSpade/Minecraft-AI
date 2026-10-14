@@ -66,11 +66,15 @@ final class AutomaticLightingSourceContractTest {
         assertTrue(watcher.contains("skipAutoLightOnSurface(bot, now, \"dark_area_light\")"));
         assertTrue(watcher.contains("auto_light_skipped"));
         assertFalse(watcher.contains("new LightAreaTask("), "automatic lighting must use LightAreaTask.automatic");
-        // Only the two genuinely idle reflexes own an area-light task. A dark-trap torch is
-        // interaction-range only, so it cannot pause the work that brought the bot there.
+        // Idle reflexes use the ordinary area-light task. A dark-trapped move is paused beneath
+        // the specialized one-cell recovery so it resumes only after its own cell is lit.
         assertEquals(2, count(watcher, "LightAreaTask.automatic(8, 8)"));
+        assertTrue(watcher.contains("LightAreaTask.automaticDarkTrap()"));
         assertTrue(watcher.contains("AutomaticLighting.tryPlaceTorchAtFeetPassively(bot)"));
         assertTrue(watcher.contains("dark_trap_passive_light"));
+        assertTrue(watcher.contains("dark_trap_light")
+                        && watcher.contains("TaskManager.INSTANCE.pauseFor(bot, reason)"),
+                "an active dark-trapped move must be paused below an accounting-aware lighting task");
         assertEquals(3, count(watcher, "night.autoLight()") + count(watcher, "night().autoLight()"),
                 "night.autoLight gates every automatic reflex");
         assertTrue(watcher.contains("return !SurfaceCheck.isOnSurface(world, feet);"),
@@ -279,6 +283,11 @@ final class AutomaticLightingSourceContractTest {
                         && automatic.contains("inventory.getNonEquipmentItems().set(equippedSlot, sourceStack)"),
                 "a passive torch must reverse its exact full-hotbar swap before returning to the task");
         assertTrue(coordinator.contains("AutomaticLighting.tryPlaceTorchAtFeetPassively(bot, tick);"));
+        assertTrue(coordinator.contains("TaskManager.INSTANCE.getActive(bot).isEmpty()"),
+                "the idle reflex must never spend an active task's placement budget or torch reserve");
+        assertTrue(coordinator.contains("!TaskManager.INSTANCE.hasPaused(bot)")
+                        && coordinator.contains("!GoalExecutor.INSTANCE.hasActivePlan(bot)"),
+                "the idle reflex must also leave paused work and active goal plans' torch reserves untouched");
         assertTrue(coordinator.indexOf("ShieldGuard.INSTANCE.tickBot(server, bot);")
                         < coordinator.indexOf("AutomaticLighting.tryPlaceTorchAtFeetPassively(bot, tick);")
                         && coordinator.indexOf("AutomaticLighting.tryPlaceTorchAtFeetPassively(bot, tick);")
