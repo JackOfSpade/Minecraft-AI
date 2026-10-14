@@ -1452,7 +1452,10 @@ public final class DangerWatcher {
         if (!night.autoLight()
                 || bot.level().isBrightOutside()
                 || active.isPresent()
-                || bot.getActionPack().hasActiveActions()) {
+                || bot.getActionPack().hasActiveActions()
+                || BrainCoordinator.INSTANCE.status(bot).busy()) {
+            // A model reply is still on its way (a player request cancelled the old work a moment ago): an automatic
+            // lighting task started now would hold the idle slot and starve the continuation of that very request.
             return false;
         }
         // While a goal plan is in progress (active is briefly empty between steps), don't insert
@@ -1516,7 +1519,8 @@ public final class DangerWatcher {
         if (TaskManager.INSTANCE.isUserPaused(bot)) {
             return false;
         }
-        if (!MinecraftAiConfig.get().night().autoLight() || active.isPresent() || bot.getActionPack().hasActiveActions()) {
+        if (!MinecraftAiConfig.get().night().autoLight() || active.isPresent() || bot.getActionPack().hasActiveActions()
+                || BrainCoordinator.INSTANCE.status(bot).busy()) {
             return false;
         }
         // While a goal plan is in progress (active is briefly empty between steps), don't insert

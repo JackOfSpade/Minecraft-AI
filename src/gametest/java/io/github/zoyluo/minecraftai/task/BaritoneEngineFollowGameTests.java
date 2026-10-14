@@ -5,12 +5,16 @@ import io.github.zoyluo.minecraftai.baritone.BaritoneNavigator;
 import io.github.zoyluo.minecraftai.baritone.BaritonePlanner;
 import io.github.zoyluo.minecraftai.baritone.BaritoneRegistry;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
+import io.github.zoyluo.minecraftai.gametest.MockPlayers;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
 import io.github.zoyluo.minecraftai.navigation.NavOutcome;
 import io.github.zoyluo.minecraftai.runtime.TaskOrigin;
+import java.util.Set;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -322,6 +326,140 @@ public final class BaritoneEngineFollowGameTests {
     }
 
     // ---------------------------------------------------------------------------------------------------------------
+    /**
+     * A copy of the real Nether bastion ledge a companion once stood frozen on (1-wide polished-blackstone wall tops, stairs, a gap
+     * floor and netherrack beyond): {@code nether_wall_top_ledge.txt} holds its blocks relative to the bot's feet cell.
+     */
+    private static void buildLedge(BaritoneEngineArena arena) throws java.io.IOException {
+        for (int dx = -13; dx <= 13; dx++) {
+            for (int dz = -9; dz <= 29; dz++) {
+                for (int dy = -8; dy <= 8; dy++) {
+                    arena.world.setBlock(arena.cell(dx, dy, dz), Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
+                }
+            }
+        }
+        try (java.io.InputStream in = BaritoneEngineFollowGameTests.class.getResourceAsStream(
+                "/minecraftai-fixtures/nether_wall_top_ledge.txt")) {
+            if (in == null) {
+                throw new IllegalStateException("missing fixture nether_wall_top_ledge.txt");
+            }
+            var blocks = arena.world.holderLookup(net.minecraft.core.registries.Registries.BLOCK);
+            for (String line : new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).split("\\R")) {
+                String[] part = line.trim().split(" ", 4);
+                if (part.length < 4) {
+                    continue;
+                }
+                BlockState state;
+                try {
+                    state = net.minecraft.commands.arguments.blocks.BlockStateParser.parseForBlock(blocks, part[3], false).blockState();
+                } catch (com.mojang.brigadier.exceptions.CommandSyntaxException failure) {
+                    throw new IllegalStateException("bad fixture block " + part[3], failure);
+                }
+                arena.world.setBlock(arena.cell(Integer.parseInt(part[0]), Integer.parseInt(part[1]), Integer.parseInt(part[2])),
+                        state, Block.UPDATE_CLIENTS);
+            }
+        }
+    }
+
+    /** The companion stood on a wall top, the owner was 14 blocks south and 2 down: a fresh bot must walk there. */
+    @GameTest(maxTicks = 900)
+    public void followFromNetherWallTopLedgeOnBaritone(GameTestHelper context) throws java.io.IOException {
+        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 11, 14, 30);
+        buildLedge(arena);
+        AIPlayerEntity target = arena.spawnHolder("BeLedgeTgt", arena.cell(-5, -2, 14));
+        AIPlayerEntity bot = arena.spawnOnBaritone("BeLedge", arena.cell(0, 0, 0));
+        FollowTask follow = assignFollow(bot, "BeLedgeTgt", "gametest_baritone_follow_ledge");
+        int[] tick = {0};
+        context.failIfEver(() -> {
+            int now = ++tick[0];
+            if (follow.state() != TaskState.RUNNING) {
+                arena.require(false, "follow ended: " + follow.state() + " " + follow.failureReason());
+            }
+            if (bot.distanceTo(target) <= ARRIVED) {
+                arena.finish(bot, target);
+            } else if (now == 400) {
+                arena.require(false, "the bot never reached the player: at " + bot.position() + " target " + target.position());
+            }
+        });
+    }
+
+    /** The real incident: killed away from the player, revived on the ledge beside them, the follow must carry on over the ledge. */
+    @GameTest(maxTicks = 900)
+    public void followWalksAgainAfterDeathOnNetherWallTopLedgeOnBaritone(GameTestHelper context) throws java.io.IOException {
+        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 12, 14, 30);
+        buildLedge(arena);
+        AIPlayerEntity target = arena.spawnHolder("BeLedgeRevTgt", arena.cell(-5, -2, 14));
+        AIPlayerEntity bot = arena.spawnOnBaritone("BeLedgeRev", arena.cell(-6, 2, 6));
+        ServerPlayer anchor = MockPlayers.survivalMock(context);
+        FollowTask follow = assignFollow(bot, "BeLedgeRevTgt", "gametest_baritone_follow_ledge_revive");
+        int[] tick = {0};
+        int[] revivedAt = {-1};
+        Vec3[] revivedPos = {null};
+        context.failIfEver(() -> {
+            int now = ++tick[0];
+            if (now == 20) {
+                anchor.teleportTo(arena.world, arena.origin.getX() + 0.5D, arena.origin.getY(), arena.origin.getZ() + 0.5D,
+                        Set.of(), 0.0F, 0.0F, true);
+                arena.world.getChunkSource().move(anchor);
+                bot.setHealth(0.0F);
+                bot.die(arena.world.damageSources().genericKill());
+                arena.require(bot.isDeadOrDying(), "the fixture bot did not enter the vanilla death state");
+            } else if (now == 80) {
+                arena.require(bot.isRemoved(), "the fixture must revive the bot after the level removed it, like a real death");
+                arena.require(AIPlayerManager.INSTANCE.respawnDeadBot(bot, anchor), "the dead bot was not revived");
+                revivedAt[0] = now;
+                revivedPos[0] = bot.position();
+            } else if (revivedAt[0] > 0 && now == revivedAt[0] + 100) {
+                double walked = bot.position().distanceTo(revivedPos[0]);
+                arena.require(walked >= 4.0D, "the revived bot did not walk: moved " + walked + " blocks in 5 seconds from "
+                        + revivedPos[0] + " task=" + follow.state() + " " + follow.failureReason());
+            } else if (revivedAt[0] > 0 && bot.distanceTo(target) <= ARRIVED) {
+                arena.finish(bot, target);
+            } else if (now == 600) {
+                arena.require(false, "never reached the player: at " + bot.position());
+            }
+        });
+    }
+
+    /**
+     * A companion killed mid-follow and revived beside a player must walk again. The revive comes after the death animation (a second or
+     * more), when the level has already removed the dead entity; it must be put back into the level, or it is never ticked again.
+     */
+    @GameTest(maxTicks = 700)
+    public void followWalksAgainAfterDeathAndRespawnOnBaritone(GameTestHelper context) {
+        BaritoneEngineArena arena = BaritoneEngineArena.build(context, 10, 16, 6);
+        AIPlayerEntity target = arena.spawnHolder("BeFollowRevTgt", arena.cell(12, 0, 0));
+        AIPlayerEntity bot = arena.spawnOnBaritone("BeFollowRev", arena.cell(-12, 0, 0));
+        ServerPlayer anchor = MockPlayers.survivalMock(context);
+        FollowTask follow = assignFollow(bot, "BeFollowRevTgt", "gametest_baritone_follow_revive");
+        int[] tick = {0};
+        int[] revivedAt = {-1};
+        int[] diedAt = {-1};
+        Vec3[] revivedPos = {null};
+        context.failIfEver(() -> {
+            int now = ++tick[0];
+            if (diedAt[0] < 0 && bot.getX() > arena.origin.getX() - 10.0D) {
+                diedAt[0] = now;
+                anchor.teleportTo(arena.world, arena.origin.getX() - 9.5D, arena.origin.getY(), arena.origin.getZ() + 0.5D,
+                        Set.of(), 0.0F, 0.0F, true);
+                arena.world.getChunkSource().move(anchor);
+                bot.setHealth(0.0F);
+                bot.die(arena.world.damageSources().genericKill());
+                arena.require(bot.isDeadOrDying(), "the fixture bot did not enter the vanilla death state");
+            } else if (diedAt[0] > 0 && revivedAt[0] < 0 && now == diedAt[0] + 60) {
+                arena.require(AIPlayerManager.INSTANCE.respawnDeadBot(bot, anchor), "the dead bot was not revived");
+                revivedAt[0] = now;
+                revivedPos[0] = bot.position();
+            } else if (revivedAt[0] > 0 && now == revivedAt[0] + 100) {
+                double walked = bot.position().distanceTo(revivedPos[0]);
+                arena.require(walked >= 4.0D, "the revived bot did not walk: moved " + walked + " blocks in 5 seconds, task="
+                        + follow.state() + " " + follow.failureReason());
+            } else if (revivedAt[0] > 0 && bot.distanceTo(target) <= ARRIVED) {
+                arena.finish(bot, target);
+            }
+        });
+    }
+
 
     private static FollowTask assignFollow(AIPlayerEntity bot, String targetName, String reason) {
         FollowTask follow = new FollowTask(targetName);

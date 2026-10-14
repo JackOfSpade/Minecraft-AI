@@ -342,6 +342,14 @@ public class AIPlayerEntity extends ServerPlayer {
     public void prepareMinecraftAiDeathRespawn() {
         this.chunkTrackingSuspendedForRespawn = true;
         this.unsetRemoved();
+        // A dead entity is removed from the level (RemovalReason.KILLED) once its death animation has run, after about a second.
+        // unsetRemoved() only clears the flag: the level's entity lookup, tick list and player list no longer hold the entity, so
+        // a bot revived after that point was never ticked again and stood frozen where it appeared. A vanilla respawn adds a
+        // fresh player to the level; this retained entity is added back the same way.
+        ServerLevel level = this.level();
+        if (level.getEntity(this.getUUID()) != this) {
+            level.addRespawnedPlayer(this);
+        }
     }
 
     /**
