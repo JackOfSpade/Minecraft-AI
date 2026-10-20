@@ -402,7 +402,13 @@ public final class BrainApiFailureGameTests {
         MinecraftAiConfig previous = MinecraftAiConfig.get();
         installConfig(previous.withLlm(new MinecraftAiConfig.Llm("test-key", service.baseUrl(), "fake-model",
                 256, 0.0D, 10, 3, 60_000, Boolean.FALSE, "low")));
-        ChatRecipientRouter.INSTANCE.configure(MinecraftAiConfig.get());
+        // The real runner schedules its normal jittered backoff, but release those waits explicitly:
+        // a fast headless server can spend 18,000 ticks before even a two-second timer becomes due.
+        // Holding every retry until all three are scheduled also proves the workers are available
+        // for the third first attempt, rather than letting one early retry hide a blocked worker.
+        List<ScheduledRetry> retrySchedule = new CopyOnWriteArrayList<>();
+        ChatRecipientRouter.INSTANCE.configure(MinecraftAiConfig.get(),
+                (delayMillis, task) -> retrySchedule.add(new ScheduledRetry(delayMillis, task)));
         GameTestCleanup.whenFinished(context, () -> {
             service.stop();
             installConfig(previous);
@@ -414,6 +420,7 @@ public final class BrainApiFailureGameTests {
                 routerCandidate("Bravo", UUID.fromString("00000000-0000-0000-0000-00000000000b")));
         AtomicInteger decisions = new AtomicInteger();
         AtomicBoolean offThread = new AtomicBoolean();
+        AtomicBoolean retriesReleased = new AtomicBoolean();
         long started = System.nanoTime();
         for (int line = 0; line < 3; line++) {
             ChatRecipientRouter.INSTANCE.select(sender, "gather wood please", candidates, decision -> {
@@ -424,17 +431,38 @@ public final class BrainApiFailureGameTests {
         }
 
         context.onEachTick(() -> {
+            if (!retriesReleased.get()) {
+                require(context, service.requests() <= 3, "a retry ran before its scheduled wait was released");
+                require(context, retrySchedule.size() <= 3, "expected only three scheduled retries");
+                if (retrySchedule.size() == 3) {
+                    require(context, service.requests() == 3,
+                            "all three first attempts must reach the service before any retry");
+                    require(context, System.nanoTime() - started < Duration.ofSeconds(10).toNanos(),
+                            "the first attempts of all three lines must not wait for a sleeping worker");
+                    for (ScheduledRetry scheduled : retrySchedule) {
+                        require(context, scheduled.delayMillis() >= LlmRetryPolicy.INITIAL_BACKOFF_MS / 2
+                                        && scheduled.delayMillis() < LlmRetryPolicy.INITIAL_BACKOFF_MS,
+                                "the real retry policy must schedule its first jittered backoff, saw "
+                                        + scheduled.delayMillis() + " ms");
+                    }
+                    retriesReleased.set(true);
+                    retrySchedule.forEach(scheduled -> scheduled.task().run());
+                }
+            }
             if (service.requests() >= 3 && service.requests() < 6) {
                 require(context, System.nanoTime() - started < Duration.ofSeconds(10).toNanos(),
                         "the first attempts of all three lines must not wait for a sleeping worker");
             }
             if (decisions.get() == 3) {
+                require(context, retrySchedule.size() == 3, "each refused request must schedule exactly one retry");
                 require(context, !offThread.get(), "a routing decision must be applied on the server thread");
                 require(context, service.requests() == 6, "expected 3 refusals and 3 answers, saw " + service.requests());
                 context.succeed();
             }
         });
     }
+
+    private record ScheduledRetry(long delayMillis, Runnable task) { }
 
     private static ChatRecipientRouter.Candidate routerCandidate(String name, UUID id) {
         PerceptionSnapshot.Equipment equipment = new PerceptionSnapshot.Equipment(null, null, null, null, null, null);

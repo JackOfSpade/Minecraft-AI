@@ -58,9 +58,15 @@ final class LlmRetryRunner {
 
     /** The production wiring: waits are scheduled on the JDK's delayed executor and jittered randomly. */
     static LlmRetryRunner standard(Executor worker) {
+        return standard(worker,
+                (delayMillis, task) -> CompletableFuture.delayedExecutor(delayMillis, TimeUnit.MILLISECONDS).execute(task));
+    }
+
+    /** Keeps the production clock and backoff policy while allowing the scheduling boundary to be driven in tests. */
+    static LlmRetryRunner standard(Executor worker, Scheduler scheduler) {
         return new LlmRetryRunner(
                 worker,
-                (delayMillis, task) -> CompletableFuture.delayedExecutor(delayMillis, TimeUnit.MILLISECONDS).execute(task),
+                scheduler,
                 () -> System.nanoTime() / 1_000_000L,
                 new LlmRetryPolicy(() -> ThreadLocalRandom.current().nextDouble()));
     }

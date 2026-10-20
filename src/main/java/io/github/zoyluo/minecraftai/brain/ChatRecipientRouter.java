@@ -43,6 +43,11 @@ public final class ChatRecipientRouter {
     }
 
     public void configure(MinecraftAiConfig config) {
+        configure(config, null);
+    }
+
+    /** Test seam for advancing retry waits independently of an accelerated GameTest server's tick rate. */
+    void configure(MinecraftAiConfig config, LlmRetryRunner.Scheduler scheduler) {
         Objects.requireNonNull(config, "config");
         synchronized (lifecycleLock) {
             generation++;
@@ -53,7 +58,7 @@ public final class ChatRecipientRouter {
             // holding one of the two worker threads and drops a line the player has since replaced.
             apiClient = OpenAiCompatibleApiClient.singleAttempt(config.llm());
             executor = Executors.newFixedThreadPool(2);
-            retry = LlmRetryRunner.standard(executor);
+            retry = scheduler == null ? LlmRetryRunner.standard(executor) : LlmRetryRunner.standard(executor, scheduler);
         }
     }
 
