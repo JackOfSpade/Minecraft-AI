@@ -4,8 +4,8 @@ import net.minecraft.core.BlockPos;
 
 /**
  * The no-progress rule of a Baritone land-follow route. Moving sideways can re-arm while it extends the route's spatial footprint;
- * otherwise it must get closer to the player (by at least {@link #CLOSER_BY} blocks) or it is stuck after {@link #WINDOW_TICKS}
- * ticks. This abandons a door it cannot open, a ledge it cannot leave, or a replan loop with a back-off,
+ * otherwise it must get closer to the player (by at least {@link #CLOSER_BY} blocks) or complete an obstacle break, or it is stuck
+ * after {@link #WINDOW_TICKS} ticks. This abandons a door it cannot open, a ledge it cannot leave, or a replan loop with a back-off,
  * so the follower neither spins in place for the whole route deadline nor restarts the same route at once.
  *
  * <p>This is the Baritone-route counterpart of {@code FollowStuckRecovery}, which watches a local action's real position. A
@@ -48,6 +48,13 @@ final class FollowProgressWindow {
         armed = false;
         maxEpisodeExtent = 0.0D;
         pursuitTarget = null;
+    }
+
+    /** A completed obstacle break advances a route even while the bot's feet stay still. */
+    void completedBreak(int now) {
+        if (armed) {
+            sinceTick = now;
+        }
     }
 
     /**

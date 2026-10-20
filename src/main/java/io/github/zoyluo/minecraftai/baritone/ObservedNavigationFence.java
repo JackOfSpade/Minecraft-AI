@@ -373,6 +373,14 @@ public final class ObservedNavigationFence {
                         pursuitRange, corridorHalfWidth, tick);
             } else {
                 observeVisibleCorridors(bot, feet, pursuitPoint, waterTraversal, observed, corridorHalfWidth, tick);
+                // A horizontal heading from a wall top must also look for visible lower
+                // walking lanes. Otherwise the only proved endpoint may be the top of the
+                // next wall, causing avoidable tunnelling instead of a safe descent. Each
+                // cell still needs the ordinary eye-ray proof; hidden floors stay absent.
+                for (int descent = 1; descent <= 3; descent++) {
+                    observeVisibleCorridors(bot, feet, pursuitPoint.below(descent),
+                            waterTraversal, observed, corridorHalfWidth, tick);
+                }
                 observeDirectionalDetourCorridors(bot, feet, pursuitPoint, route, waterTraversal, observed,
                         corridorHalfWidth, tick);
             }

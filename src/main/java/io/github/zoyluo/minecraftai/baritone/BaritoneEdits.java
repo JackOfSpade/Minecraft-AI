@@ -80,6 +80,24 @@ public final class BaritoneEdits {
         return of(botId).stream().filter(edit -> edit.kind() == kind).toList();
     }
 
+    /** Last successful governed break; attempted swings do not count as route progress. */
+    public static int lastBreakTick(UUID botId) {
+        Deque<Edit> deque = EDITS.get(botId);
+        if (deque == null) {
+            return Integer.MIN_VALUE;
+        }
+        synchronized (deque) {
+            var newestFirst = deque.descendingIterator();
+            while (newestFirst.hasNext()) {
+                Edit edit = newestFirst.next();
+                if (edit.kind() == Kind.BREAK) {
+                    return edit.serverTick();
+                }
+            }
+        }
+        return Integer.MIN_VALUE;
+    }
+
     /** Forgets the bot's edits (its instance was destroyed). */
     static void clear(UUID botId) {
         EDITS.remove(botId);

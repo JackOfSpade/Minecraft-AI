@@ -919,7 +919,7 @@ public final class DangerWatcher {
                 || CombatCore.isBossThreat(entity)
                 || CombatCore.isMeleeForbiddenThreat(entity)
                 || CombatCore.isDrawnRangedForeignBot(entity)
-                || isAggroTargetingOwner(bot, entity)
+                || (entity instanceof Mob && isAggroTargetingOwner(bot, entity))
                 || bot.getHealth() <= MinecraftAiConfig.get().combat().retreatHp()) {
             return false;
         }
