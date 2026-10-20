@@ -314,7 +314,7 @@ public final class GoalExecutor {
                 : CapacityParentNamespace.decode(restore.capacityParentNamespace());
         if (restore != null && !restore.capacityParentNamespace().isBlank()
                 && decodedCapacityParent.isEmpty()) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             GoalEvaluation invalidEvaluation = GoalPredicates.evaluate(goal,
                     GoalSnapshotCollector.collect(bot, goal, restore.context()),
                     restore.context().completedDeliveries());
@@ -335,7 +335,7 @@ public final class GoalExecutor {
                 && restore.batchCheckpoint().stepLimit() != ADAPTIVE_STRATEGY_STEP_LIMIT)
                 || (mode != ExecutionMode.ADAPTIVE
                 && restore.batchCheckpoint().stepLimit() != DEFAULT_AUTONOMOUS_BATCH_STEP_LIMIT))) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_execution_mode_checkpoint_mismatch");
@@ -348,7 +348,7 @@ public final class GoalExecutor {
                 goal, restore.context().completedDeliveries())
                 || !skippedTargetReceiptsAuthorized(
                 goal, restore.skippedTargetReceipts()))) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     restore.validationFailure().isBlank()
@@ -378,7 +378,7 @@ public final class GoalExecutor {
                 || persistedCapacityParentServicesUsed < 0
                 || !persistedCapacityParentFace.isBlank()
                 && decodedCapacityParentFace == null) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_incompatible_capacity_parent_checkpoint");
@@ -390,7 +390,7 @@ public final class GoalExecutor {
         if (persistedRareResourceEpoch < 0
                 || persistedRareResourceEpoch
                 > MiningBudget.MAX_RARE_RESOURCE_RETRIES_PER_BATCH + rareEpochMarginPool) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_rare_resource_retry_count");
@@ -400,7 +400,7 @@ public final class GoalExecutor {
                 ? 0 : restore.rareEpochMarginUsed();
         if (!validRestoredRareEpochMargin(persistedRareResourceEpoch,
                 persistedRareEpochMarginUsed, rareEpochMarginPool)) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_rare_epoch_margin");
@@ -414,7 +414,7 @@ public final class GoalExecutor {
                 || restoredSettledServices.orElseThrow().stream()
                 .anyMatch(settled -> !missionId.toString().equals(
                         settled.authority().descriptor().missionId()))) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_settled_service_tombstone");
@@ -427,7 +427,7 @@ public final class GoalExecutor {
                 HuntPickupCheckpoint.inspect(restoredHuntCheckpoint);
         if (restore != null && restore.taskCheckpointKind() == GoalStep.Kind.HUNT
                 && restoredHunt.isEmpty()) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_hunt_pickup_checkpoint");
@@ -443,7 +443,7 @@ public final class GoalExecutor {
                         bot.level().getGameTime())
                 || !metadata.open()
                 && !trustedClosedHuntPickupReceipt(bot, metadata)).isPresent()) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_hunt_pickup_checkpoint");
@@ -462,7 +462,7 @@ public final class GoalExecutor {
                 || !liveServiceDimension.equals(
                 restoredService.orElseThrow().serviceDimension())
                 && restoredService.orElseThrow().terminalFailure().isBlank())) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_mining_service_checkpoint");
@@ -492,7 +492,7 @@ public final class GoalExecutor {
             if (currentServiceAuthority.isEmpty()
                     || hasActiveServicePocket(restoredServiceCheckpoint) && guardedGeometry
                     || conflictingTerminalAuthority) {
-                queued.removeFirstOccurrence(goal);
+                removeFirstQueuedGoal(queued, goal);
                 recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                         GoalResult.classify(initialEvaluation, false),
                         "mission_restore_invalid_settled_service_tombstone");
@@ -516,7 +516,7 @@ public final class GoalExecutor {
                 restoredOreDigCheckpoint);
         if (restore != null && restore.taskCheckpointKind() == GoalStep.Kind.MINE_ORE
                 && restoredOreDig.isEmpty()) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_ore_dig_checkpoint");
@@ -552,7 +552,7 @@ public final class GoalExecutor {
             restoredMining = Optional.empty();
         }
         if (!restoredMiningCheckpoint.isEmpty() && restoredMining.isEmpty()) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_mining_checkpoint");
@@ -596,7 +596,7 @@ public final class GoalExecutor {
                 && (restoredAuxiliaryMining.isEmpty() || !restoredProtectedRareMining
                 || restoredCapacityParent == null && !unmarkedClosedAuxiliaryService
                 && !validAuxiliaryContinuation)) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_auxiliary_mining_checkpoint");
@@ -682,7 +682,7 @@ public final class GoalExecutor {
                 || restoredCapacityParent == CapacityParentNamespace.AUXILIARY
                 && !restoredProtectedRareMining
                 || !supportedCapacityRepairTask)) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_incompatible_capacity_parent_checkpoint");
@@ -694,7 +694,7 @@ public final class GoalExecutor {
         if (restoredOreDig.isPresent() && restoredMining.isPresent()
                 && !protectedRareNamespace && !restoredCapacityRepairOre
                 && !restoredOreDigCheckpoint.equals(restoredMiningCheckpoint)) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_incompatible_mining_checkpoint");
@@ -710,7 +710,7 @@ public final class GoalExecutor {
         OptionalInt normalizedRareResourceEpoch = normalizeRestoredRareResourceEpoch(
                 persistedRareResourceEpoch, restoredRareEpochOwner);
         if (normalizedRareResourceEpoch.isEmpty()) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_incompatible_rare_resource_epoch");
@@ -724,7 +724,7 @@ public final class GoalExecutor {
                 DigDownTask.inspectCheckpoint(restoredDigDownCheckpoint);
         if (restore != null && restore.taskCheckpointKind() == GoalStep.Kind.MINE
                 && restoredDigDown.isEmpty()) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_dig_down_checkpoint");
@@ -740,7 +740,7 @@ public final class GoalExecutor {
                 DescendToYTask.inspectCheckpoint(restoredDescendCheckpoint);
         if (restore != null && restore.taskCheckpointKind() == GoalStep.Kind.DESCEND_TO_Y
                 && restoredDescend.isEmpty()) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_descend_checkpoint");
@@ -760,7 +760,7 @@ public final class GoalExecutor {
         Optional<CreateObsidianTask.RestoreMetadata> restoredObsidian =
                 CreateObsidianTask.inspectCheckpoint(restoredObsidianCheckpoint);
         if (!restoredObsidianCheckpoint.isEmpty() && restoredObsidian.isEmpty()) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_invalid_obsidian_checkpoint");
@@ -912,7 +912,7 @@ public final class GoalExecutor {
                     case OBSIDIAN_PREFLIGHT, OBSIDIAN_8 ->
                             "mission_restore_incompatible_obsidian_service_checkpoint";
                 };
-                queued.removeFirstOccurrence(goal);
+                removeFirstQueuedGoal(queued, goal);
                 recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                         GoalResult.classify(initialEvaluation, false), reason);
                 return false;
@@ -921,7 +921,7 @@ public final class GoalExecutor {
         if (mergedSettledTerminalReceipt) {
             if (!liveServiceDimension.equals(
                     restoredService.orElseThrow().serviceDimension())) {
-                queued.removeFirstOccurrence(goal);
+                removeFirstQueuedGoal(queued, goal);
                 recordImmediateResult(bot, missionId, goal, startedTick,
                         initialEvaluation, GoalResult.Status.FAILED,
                         mergedSettledTerminalFailure);
@@ -940,7 +940,7 @@ public final class GoalExecutor {
             Optional<Map<String, String>> acknowledged =
                     CreateObsidianTask.acknowledgeServiceBoundary(restoredObsidianCheckpoint);
             if (acknowledged.isEmpty()) {
-                queued.removeFirstOccurrence(goal);
+                removeFirstQueuedGoal(queued, goal);
                 recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                         GoalResult.classify(initialEvaluation, false),
                         "mission_restore_invalid_obsidian_service_ack");
@@ -970,7 +970,7 @@ public final class GoalExecutor {
         if (openCapacityRepairOre && !restoredOreDigPhysicalDebt
                 && (!plan.success() || !hasFreshMiningSuccessor(
                 plan.steps(), restoredOreDig.orElseThrow()))) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_incompatible_capacity_repair_checkpoint");
@@ -999,7 +999,7 @@ public final class GoalExecutor {
         if (committedRareDescentKit && !committedRareDescentKitReady
                 && plan.success()
                 && plan.steps().stream().noneMatch(GoalStep::isRareDescentKitService)) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_rare_descent_kit_not_ready");
@@ -1080,7 +1080,7 @@ public final class GoalExecutor {
                 && (!restoredOreDigPhysicalDebt || plan.success())
                 && !hasFreshMiningSuccessor(
                 plan.steps(), restoredOreDig.orElseThrow())) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_incompatible_ore_dig_successor");
@@ -1090,7 +1090,7 @@ public final class GoalExecutor {
             boolean miningLedgerOpen = !restoredProtectedRareMining
                     && hasOreDigPhysicalLedger(restoredMiningCheckpoint);
             if (miningLedgerOpen) {
-                queued.removeFirstOccurrence(goal);
+                removeFirstQueuedGoal(queued, goal);
                 recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                         GoalResult.classify(initialEvaluation, false),
                         "mission_restore_orphaned_ordinary_service_ledger");
@@ -1130,7 +1130,7 @@ public final class GoalExecutor {
                     || matchingMiningNamespace
                     && hasOreDigPhysicalLedger(restoredMiningCheckpoint);
             if (ordinaryPhysicalDebt && plan.success()) {
-                queued.removeFirstOccurrence(goal);
+                removeFirstQueuedGoal(queued, goal);
                 recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                         GoalResult.classify(initialEvaluation, false),
                         "mission_restore_orphaned_ordinary_mining_ledger");
@@ -1138,7 +1138,7 @@ public final class GoalExecutor {
             }
             if (!ordinaryPhysicalDebt && hasFreshMiningSuccessor(
                     plan.steps(), restoredOreDig.orElseThrow().ores())) {
-                queued.removeFirstOccurrence(goal);
+                removeFirstQueuedGoal(queued, goal);
                 recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                         GoalResult.classify(initialEvaluation, false),
                         "mission_restore_incompatible_ore_dig_successor");
@@ -1160,7 +1160,7 @@ public final class GoalExecutor {
                 && !terminalOrdinaryServiceRestore
                 && restoredCapacityParent != CapacityParentNamespace.MINING) {
             if (hasOreDigPhysicalLedger(restoredMiningCheckpoint)) {
-                queued.removeFirstOccurrence(goal);
+                removeFirstQueuedGoal(queued, goal);
                 recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                         GoalResult.classify(initialEvaluation, false),
                         "mission_restore_orphaned_ordinary_mining_ledger");
@@ -1174,7 +1174,7 @@ public final class GoalExecutor {
                 && restoredDigDown.isEmpty() && !interruptedDescend
                 && restoredOreDig.filter(
                 OreDigTask.RestoreMetadata::batchOpen).isEmpty()) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.Status.COMPLETED, "already_satisfied",
                     restoredSkippedResults);
@@ -1205,7 +1205,7 @@ public final class GoalExecutor {
         // goals, a successful plan with no identity, and a different positive target fail closed.
         if (unsettledService && restoredPreflight
                 && !preflightTargetMatches && !plannedPreflightUnknown) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_incompatible_obsidian_service_checkpoint");
@@ -1263,7 +1263,7 @@ public final class GoalExecutor {
                 && !unsettledHuntPickup
                 && (restoredPreflight || restoredObsidianBoundary || interruptedObsidian);
         if (compoundObsidianTailUnavailable) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_compound_obsidian_tail_unavailable",
@@ -1277,7 +1277,7 @@ public final class GoalExecutor {
         if (interruptedObsidian
                 && !transactionTargetMatchesFresh
                 && !transactionTargetMatchesUnknownDirect) {
-            queued.removeFirstOccurrence(goal);
+            removeFirstQueuedGoal(queued, goal);
             recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                     GoalResult.classify(initialEvaluation, false),
                     "mission_restore_incompatible_obsidian_service_checkpoint",
@@ -1390,7 +1390,7 @@ public final class GoalExecutor {
                         .emergencyBlocksReserved();
                 if ((explicitCapacityPolicy || capacityOrdinaryServiceRestore)
                         && ordinaryServiceParent.isEmpty()) {
-                    queued.removeFirstOccurrence(goal);
+                    removeFirstQueuedGoal(queued, goal);
                     recordImmediateResult(bot, missionId, goal, startedTick, initialEvaluation,
                             GoalResult.classify(initialEvaluation, false),
                             "mission_restore_orphaned_capacity_handoff_cursor");
@@ -1428,7 +1428,7 @@ public final class GoalExecutor {
         }
         // replace boundary: A is active, B is already queued, then in the same batch: stop + B. B is removed from the old queue only after it has been successfully planned;
         // if planning the replacement fails, keep B so the next tick's normal queue drain can handle it again -- the goal must never be silently dropped.
-        queued.removeFirstOccurrence(goal);
+        removeFirstQueuedGoal(queued, goal);
         if (restoredSteps.isEmpty()) {
             activePlans.remove(bot.getUUID());
             GoalResult.Status status = GoalResult.classify(initialEvaluation, false);
@@ -5634,36 +5634,32 @@ public final class GoalExecutor {
         }
     }
 
-    /** Keeps a queued goal's execution policy durable without changing its semantic goal value. */
-    private static final class QueuedGoal {
-        private final Goal goal;
-        private final ExecutionMode executionMode;
-
-        private QueuedGoal(Goal goal, ExecutionMode executionMode) {
-            this.goal = java.util.Objects.requireNonNull(goal, "goal");
-            this.executionMode = executionMode == null ? ExecutionMode.STANDARD : executionMode;
+    /**
+     * Removes the first matching goal payload while preserving the policies and order of all
+     * other requests. Deque.removeFirstOccurrence compares the lookup object's equals method:
+     * a bare Goal can never equal the policy wrapper, even if that wrapper accepts a bare Goal.
+     * A successfully installed replacement consumes the queued request regardless of whether
+     * its new execution policy differs from the originally queued one.
+     */
+    static boolean removeFirstQueuedGoal(java.util.Deque<QueuedGoal> queued, Goal goal) {
+        java.util.Objects.requireNonNull(goal, "goal");
+        for (QueuedGoal candidate : queued) {
+            if (candidate.goal().equals(goal)) {
+                return queued.removeFirstOccurrence(candidate);
+            }
         }
+        return false;
+    }
 
-        private Goal goal() {
-            return goal;
+    /** Keeps a queued goal's execution policy durable without changing its semantic goal value. */
+    record QueuedGoal(Goal goal, ExecutionMode executionMode) {
+        QueuedGoal {
+            java.util.Objects.requireNonNull(goal, "goal");
+            executionMode = executionMode == null ? ExecutionMode.STANDARD : executionMode;
         }
 
         private MissionSpec spec() {
             return MissionSpec.fromGoal(goal, executionMode);
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            // Several long-lived validation paths remove a just-submitted Goal from this queue.
-            // Preserve their semantic "same goal" behavior while retaining the policy payload.
-            return other instanceof QueuedGoal queued
-                    ? goal.equals(queued.goal) && executionMode == queued.executionMode
-                    : other instanceof Goal otherGoal && goal.equals(otherGoal);
-        }
-
-        @Override
-        public int hashCode() {
-            return goal.hashCode();
         }
     }
 
