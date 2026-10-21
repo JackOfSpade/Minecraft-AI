@@ -10,6 +10,7 @@ import io.github.zoyluo.minecraftai.action.PaceOwner;
 import io.github.zoyluo.minecraftai.action.PacePolicy;
 import io.github.zoyluo.minecraftai.action.QuietZone;
 import io.github.zoyluo.minecraftai.brain.BrainCoordinator;
+import io.github.zoyluo.minecraftai.baritone.BaritoneEdits;
 import io.github.zoyluo.minecraftai.entity.AIPlayerEntity;
 import io.github.zoyluo.minecraftai.log.BotLog;
 import io.github.zoyluo.minecraftai.manager.AIPlayerManager;
@@ -123,6 +124,7 @@ public final class FollowTask extends AbstractTask {
     private PortalDeparture portalDeparture;
     /** The no-progress rule of the running Baritone route (see FollowProgressWindow). */
     private final FollowProgressWindow baritoneProgress = new FollowProgressWindow();
+    private int lastRouteBreakTick = Integer.MIN_VALUE;
     private int baritoneStarts;
     private int baritoneRegoals;
     /** True after the land follower reached its standoff, retaining a small departure hysteresis. */
@@ -669,6 +671,11 @@ public final class FollowTask extends AbstractTask {
         holdingStandoff = false;
         if (!pack.isPathExecutorIdle()) {
             waiting = false;
+            int completedBreakTick = BaritoneEdits.lastBreakTick(bot.getUUID());
+            if (completedBreakTick > lastRouteBreakTick) {
+                lastRouteBreakTick = completedBreakTick;
+                baritoneProgress.completedBreak(elapsed);
+            }
             if (baritoneProgress.stalled(elapsed, bot.distanceTo(target), bot.getX(), bot.getZ())) {
                 // A route that gets the bot nowhere (a door it cannot open, a replan loop) is abandoned with a back-off, the way
                 // the prior local controller abandoned a frozen executor, instead of spinning until the route deadline.

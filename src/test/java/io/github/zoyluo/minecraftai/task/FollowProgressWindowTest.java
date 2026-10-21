@@ -9,6 +9,16 @@ import org.junit.jupiter.api.Test;
 /** The no-progress window of a Baritone land-follow route. */
 class FollowProgressWindowTest {
     @Test
+    void completedObstacleBreakGivesTheRouteTimeToWalkButCannotHideAStallForever() {
+        FollowProgressWindow window = new FollowProgressWindow();
+        window.stalled(0, 10.0, 0, 0);
+        window.completedBreak(90);
+        assertFalse(window.stalled(100, 10.0, 0, 0), "a real obstacle was just removed");
+        assertFalse(window.stalled(189, 10.0, 0, 0));
+        assertTrue(window.stalled(190, 10.0, 0, 0), "failed swings must not renew the window");
+    }
+
+    @Test
     void aBotThatStandsStillIsStalledAfterTheWindowAndNotBefore() {
         FollowProgressWindow window = new FollowProgressWindow();
         assertFalse(window.stalled(0, 10.0, 0, 0), "arming tick");
