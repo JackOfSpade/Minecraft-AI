@@ -127,10 +127,21 @@ public final class DigOutTaskGameTests {
         InventoryAction.giveItem(bot, new ItemStack(Items.STONE_PICKAXE));
         Map<BlockPos, BlockState> before = snapshot(world, feet);
         DigOutTask task = new DigOutTask();
-        TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_out_walled"));
         int[] ticks = {0};
         context.failIfEver(() -> {
             require(context, bot.isAlive(), "the bot died");
+            require(context, ++ticks[0] < 1400, "the task neither dug out nor gave up: " + bot.blockPosition());
+            if (task.state() == TaskState.PENDING) {
+                // Fixture block edits update vanilla lighting asynchronously. Until the roof's
+                // skylight has actually gone dark, an emergency dig-out correctly ends as safe.
+                // Count this setup wait inside the original deadline, then test the refusal in
+                // the intended dark chamber rather than racing the light engine on fast CI.
+                if (!DangerWatcher.isDarkTrapCell(world, feet)) {
+                    return;
+                }
+                TaskManager.INSTANCE.assign(bot, task,
+                        TaskOrigin.of(TaskOrigin.Kind.VERIFY, "gametest_dig_out_walled"));
+            }
             if (task.state() == TaskState.FAILED) {
                 require(context, task.failureReason().startsWith("dig_out_blocked:break_refused"),
                         "the task did not say it was refused a break: " + task.failureReason());
@@ -143,7 +154,6 @@ public final class DigOutTaskGameTests {
                 return;
             }
             require(context, task.state() == TaskState.RUNNING, "the task ended as " + task.state());
-            require(context, ++ticks[0] < 1400, "the task neither dug out nor gave up: " + bot.blockPosition());
         });
     }
 
